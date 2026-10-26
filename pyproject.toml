@@ -1,7 +1,7 @@
 [project]
 name = "catalyst-mcp"
 version = "0.1.0"
-description = "Add your description here"
+description = "Business-model analysis and use-case ideation through MCP"
 readme = "README.md"
 authors = [
     { name = "ki94mach", email = "kian.mohajeri@gmail.com" }
@@ -15,3 +15,8 @@ catalyst-mcp = "catalyst_mcp:main"
 [build-system]
 requires = ["uv_build>=0.12.23,<0.13.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1,<10.0.0",
+]

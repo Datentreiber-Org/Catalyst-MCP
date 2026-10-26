@@ -52,13 +52,15 @@ The proposed implementation uses one Python backend, the official MCP SDK, Pydan
 
 ## Implementation status
 
-The repository currently contains Python package scaffolding and a placeholder entry point. MCP tools, resource readers, persistence, model integration and automated tests are not implemented. See the product document for open implementation choices.
+The repository currently contains Python package scaffolding, a placeholder entry point, and a uv development setup with pytest. MCP tools, resource readers, persistence, model integration and application tests are not implemented. See the product document for open implementation choices.
 
 ## Implementation checklist
 
-Planning and this working agreement are recorded. No coding step has been authorized or completed. Add only the dependencies, configuration, documentation, and tests needed by each authorized step.
+Step 1 is authorized and complete. Later steps remain unimplemented and require explicit authorization. Add only the dependencies, configuration, documentation, and tests needed by each authorized step.
 
-- [ ] 1. Verify Python 3.12+, repair package metadata's missing README, and establish the test setup.
+Step 1 verification: Python 3.12.2, pytest 9.1.1, locked environment sync, package import, source-distribution and wheel builds, and placeholder command execution were verified. Pytest collected zero tests and returned exit code 5; no application test suite exists yet. Fake-provider, live-model, and host-integration checks have not been performed.
+
+- [x] 1. Verify Python 3.12+, repair package metadata's missing README, and establish the test setup.
 - [ ] 2. Define and test Business Artifact input, generated-content, and saved-object models.
 - [ ] 3. Define and test ideation input, generated-content, alignment, and Catalog models.
 - [ ] 4. Add atomic Business Artifact storage, retrieval, and listing in SQLite.
