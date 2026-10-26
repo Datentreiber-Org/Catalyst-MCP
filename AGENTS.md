@@ -4,6 +4,17 @@
 
 Read [Product scope and requirements](docs/PROJECT_CONTEXT.md) and the [MVP system design](docs/SYSTEM_DESIGN.md) before making implementation changes. The product document defines the MVP scope; the system design records a proposed implementation. Keep both documents consistent as decisions are made.
 
+## Incremental working agreement
+
+- Build Catalyst in small steps that the user can comfortably review and understand. The checklist below is a proposed sequence, not authorization to implement it.
+- Before editing code for a step, explain its purpose, the files involved, and how it will be verified. Resolve any contract decisions needed for that step before encoding them.
+- Implement only the step the user explicitly authorizes. Keep the code straightforward and add only what that step needs; do not scaffold future features. Split a step that would become too large to review and obtain authorization for the smaller scope before implementing it.
+- After implementation, explain every new function or class and demonstrate at least one concrete input-to-output example for the step.
+- Run the relevant checks, report the results actually observed, and state what remains unimplemented. Distinguish fake-provider tests, live-model checks, and host-integration checks.
+- Stop after each step and wait for explicit authorization before implementing the next one. Questions about current code, explanations, and discussion of the plan do not authorize further implementation.
+- Maintain the short checklist below as work progresses. Check an item only when its scope is implemented and verified; record any verification limitations alongside its status. Keep the project documents consistent with decisions and actual behavior.
+- Do not commit or push automatically.
+
 ## Goal and contracts
 
 Implement this complete flow:
@@ -42,3 +53,25 @@ The proposed implementation uses one Python backend, the official MCP SDK, Pydan
 ## Implementation status
 
 The repository currently contains Python package scaffolding and a placeholder entry point. MCP tools, resource readers, persistence, model integration and automated tests are not implemented. See the product document for open implementation choices.
+
+## Implementation checklist
+
+Planning and this working agreement are recorded. No coding step has been authorized or completed. Add only the dependencies, configuration, documentation, and tests needed by each authorized step.
+
+- [ ] 1. Verify Python 3.12+, repair package metadata's missing README, and establish the test setup.
+- [ ] 2. Define and test Business Artifact input, generated-content, and saved-object models.
+- [ ] 3. Define and test ideation input, generated-content, alignment, and Catalog models.
+- [ ] 4. Add atomic Business Artifact storage, retrieval, and listing in SQLite.
+- [ ] 5. Add Catalog storage, retrieval, and listing with enforced source associations.
+- [ ] 6. Render complete, deterministic Business Artifact Markdown.
+- [ ] 7. Render complete, deterministic Catalog Markdown.
+- [ ] 8. Implement analysis generation, validation, bounded correction, and saving with a fake provider.
+- [ ] 9. Implement ideation from a saved artifact with exact count and alignment validation using a fake provider.
+- [ ] 10. Start the stdio MCP server and expose the analysis tool with complete saved-object results.
+- [ ] 11. Expose the ideation tool and verify the two-tool flow with a fake provider.
+- [ ] 12. Advertise and read canonical JSON resources for both saved object types.
+- [ ] 13. Advertise and read Markdown resources and add links to both views in tool results.
+- [ ] 14. Configure and test one real LLM-provider adapter and the runtime settings it needs.
+- [ ] 15. Connect the analysis prompt to the real provider adapter.
+- [ ] 16. Connect the ideation prompt to the real provider adapter.
+- [ ] 17. Verify restart persistence and the complete flow; separately assess live-model quality and selected-host compatibility.
