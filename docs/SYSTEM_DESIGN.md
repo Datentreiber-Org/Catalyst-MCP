@@ -1,6 +1,6 @@
 # Catalyst MVP system design
 
-Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence for both record types, the Business Artifact Markdown renderer, and their tests are implemented. Catalog rendering, MCP integration and generation remain proposed work.
+Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence and deterministic Markdown rendering for both record types, and their tests are implemented. MCP integration and generation remain proposed work.
 
 See [Product scope and requirements](PROJECT_CONTEXT.md) for the product contracts, scope and open choices. This document recommends implementation details, including create-only records, optional input focus, string-array entries, alignment objects and generation limits. These details remain proposals unless explicitly recorded as implementation decisions below.
 
@@ -228,7 +228,16 @@ Treat stored strings as document content and escape Markdown syntax or HTML wher
 - Escape Markdown punctuation and HTML-sensitive characters in supplied values. Represent internal newlines with hard line breaks and indent their continuation lines within the same bullet. Encode tabs, carriage returns, line-edge spaces and trailing newlines as character references so they are retained without becoming template syntax.
 - Keep rendering pure and deterministic: no provider calls, repository access, file writes, current-time timestamps or changes to the supplied artifact. Callers can load a saved artifact through the repository and pass it to the renderer.
 - Use `markdown-it-py` only as a development dependency. Tests parse CommonMark with HTML parsing enabled to verify literal text recovery, complete fields, section order and the absence of injected structure or active HTML.
-- Catalog rendering, resource discovery, MIME types and the `/view.md` reader remain later steps. This step adds no resource handler or separately stored document.
+- Step 6 adds only the Business Artifact renderer. Step 7 adds Catalog rendering below; resource discovery, MIME types and the `/view.md` reader remain later steps. Rendering adds no resource handler or separately stored document.
+
+#### Recorded Catalog rendering decisions (step 7)
+
+- Add `render_use_case_catalog` to `markdown_views.py`, accepting a complete `UseCaseCatalog` and returning Markdown text from a JSON-compatible snapshot. Reuse the existing literal-text escaping helper.
+- Start with Catalog ID, saved timestamps, source artifact ID and its canonical JSON URI, computed as `catalyst://business-artifact/{sourceArtifact.id}`. Display the URI as escaped text, consistent with the artifact view; do not add URI fields to saved data.
+- Render each case under a numbered heading in array order. Include its ID, title, focus and problem, followed by Target users, Proposed solution and Business element alignment sections. Preserve target-user order and label an empty target-user list "Not specified".
+- Number alignment entries within each case and include every entry's exact section key, source element text and rationale. Keep duplicate entries and all content; view numbering identifies array positions rather than new domain IDs.
+- Keep rendering pure and deterministic, with no provider calls, source lookup, database access, file writes or new timestamps. Callers can load the Catalog through the repository before rendering it. Exact source-element matching remains a later workflow check.
+- Verify parsed CommonMark structure, complete text, ordering, escaping and identical results after a process restart. Verify that both Catalog and source JSON, timestamps and saved files stay unchanged. MCP routes, MIME types and host display remain later integration work.
 
 MCP exposes content identified by URI through resource reads; storage remains the application's responsibility. See the [resource specification](https://modelcontextprotocol.io/specification/draft/server/resources).
 
@@ -345,11 +354,11 @@ tests/
   test_artifact_repository.py  Business Artifact storage, restart and rollback tests
   test_catalog_repository.py   Catalog storage, source association and rollback tests
   test_artifact_markdown.py    Complete Business Artifact view and escaping checks
-  test_catalog_markdown.py
+  test_catalog_markdown.py     Complete Catalog view, source references and escaping checks
   test_mcp_flow.py
 ```
 
-The package entry point, Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and the Business Artifact renderer in `markdown_views.py` currently exist. Tests exist in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py`, `test_catalog_repository.py` and `test_artifact_markdown.py`. The repository creates both tables and enforces the Catalog-to-artifact foreign key; the renderer returns text without storage changes. The other modules and test files above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names. Test examples currently live directly in those test modules; no fixtures directory has been added.
+The package entry point, Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and both renderers in `markdown_views.py` currently exist. Tests exist in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py`, `test_catalog_repository.py`, `test_artifact_markdown.py` and `test_catalog_markdown.py`. The repository creates both tables and enforces the Catalog-to-artifact foreign key; the renderers return text without storage changes. The other modules and test files above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names. Test examples currently live directly in those test modules; no fixtures directory has been added.
 
 The prompt files contain backend generation instructions. They are not separately registered MCP Prompts in this MVP.
 

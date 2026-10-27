@@ -7,8 +7,8 @@ The repository currently contains a Python package with a placeholder command,
 a development setup, and validated Business Artifact and Use-case Catalog models
 with contract tests. Business Artifacts and Catalogs can be saved, read and listed
 through a SQLite repository, with Catalog source associations enforced by a
-foreign key. Business Artifacts have a deterministic Markdown renderer. Catalog
-rendering, MCP tools, resource readers and model integration are not implemented yet.
+foreign key. Both record types have deterministic Markdown renderers. MCP tools,
+resource readers and model integration are not implemented yet.
 
 ## Development setup
 
@@ -58,8 +58,8 @@ The current tests cover analysis and ideation inputs, generated content and the
 complete Business Artifact and Catalog shapes, plus persistence of both record
 types in real temporary SQLite files. They check strict types, all 12 business-model
 sections, alignment structure, metadata consistency, source associations, JSON
-round trips, process restart persistence and failure rollback. Business Artifact
-Markdown tests parse the output as CommonMark and verify content preservation,
+round trips, process restart persistence and failure rollback. Markdown tests for
+both record types parse the output as CommonMark and verify content preservation,
 escaping, completeness and determinism. These local tests do not call a fake or
 live model provider or connect to an MCP host.
 
@@ -73,6 +73,8 @@ live model provider or connect to an MCP host.
   restart persistence and failure atomicity.
 - `tests/test_artifact_markdown.py` covers the complete Business Artifact view,
   literal text, deterministic rendering and unchanged saved records.
+- `tests/test_catalog_markdown.py` covers Catalog metadata, source references,
+  all case fields and alignments, literal text and unchanged saved records.
 
 `markdown-it-py` is a development dependency used to parse Markdown in tests.
 The production renderer uses Python's standard library and the existing models.
@@ -259,7 +261,41 @@ all 12 business-model sections. For example, its Activities section is:
 Empty sections contain `Not specified`. Text is escaped as literal content;
 multiline values remain within their original bullet. Rendering returns a string
 without calling a model, writing a Markdown file or changing the saved record.
-Catalog rendering and the MCP Markdown routes remain later steps.
+The MCP Markdown routes remain later steps.
+
+## Catalog Markdown
+
+After the Catalog storage example, render the saved Catalog from the same database:
+
+```python
+from catalyst_mcp.markdown_views import render_use_case_catalog
+from catalyst_mcp.repository import SQLiteRepository
+
+repository = SQLiteRepository("data/catalyst.sqlite3")
+catalog = repository.get_use_case_catalog("uc_catalog_demo")
+print(render_use_case_catalog(catalog))
+```
+
+The result includes Catalog ID and timestamps, source artifact ID and its computed
+canonical JSON URI, every case's fields, all target users and all alignment entries.
+For example, the first alignment in the generated Markdown source is:
+
+```markdown
+#### Alignment 1
+
+- **Section:** activities
+- **Element:** Repair bicycles
+- **Rationale:** Routes repair work to workshop staff\.
+```
+
+Cases and alignment entries are numbered by their saved array positions. Stored
+IDs, content order and duplicate entries are preserved. Empty target-user lists
+contain `Not specified`. The source URI is computed for display; no URI field is
+added to the Catalog or source reference.
+
+Like the artifact renderer, this returns text without model calls, database or
+file writes, source lookups or new timestamps. The MCP Markdown routes and host
+display remain later integration work.
 
 ## Build the package
 

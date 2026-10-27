@@ -1,6 +1,6 @@
 # Catalyst product scope and requirements
 
-Status: MVP requirements with a proposed implementation. Business Artifact and Use-case Catalog schemas, SQLite persistence for both record types, the Business Artifact Markdown renderer, and their tests are implemented; the tool workflows are not implemented.
+Status: MVP requirements with a proposed implementation. Business Artifact and Use-case Catalog schemas, SQLite persistence and deterministic Markdown rendering for both record types, and their tests are implemented; the tool workflows are not implemented.
 
 ## 1. Product purpose
 
@@ -104,6 +104,8 @@ Step 5 extends the same repository with Catalog save, get-by-ID and listing oper
 
 Step 6 adopts a fixed CommonMark template for the Business Artifact view: five metadata fields followed by all 12 labeled business-model sections, with statements in saved order and explicit empty sections. Rendering is a pure function over a complete artifact, with no model calls, database writes or separate stored Markdown document. CommonMark parsing in tests verifies that escaped content remains text and the template structure stays intact. See the [recorded renderer decisions](SYSTEM_DESIGN.md#recorded-business-artifact-rendering-decisions-step-6).
 
+Step 7 adopts the same approach for Catalogs: Catalog metadata and source artifact ID/URI followed by every use case, target user and alignment entry in saved order. Numbered view headings identify case and alignment positions without changing their stored IDs. Empty target-user lists are explicit. The source URI is computed from `sourceArtifact.id` for display; no URI field is added to the Catalog or source reference. See the [recorded Catalog renderer decisions](SYSTEM_DESIGN.md#recorded-catalog-rendering-decisions-step-7).
+
 ## 4. Domain and MCP concepts
 
 - **Business content:** text supplied for analysis. Input files and extracted text are not automatically registered MCP Resources.
@@ -165,9 +167,9 @@ The create-only MVP postpones these editing and propagation semantics.
 
 ## 8. Implementation status and open choices
 
-The repository has a `src/catalyst_mcp/` package with a placeholder entry point and strict Pydantic 2 models for analysis and ideation inputs, generated content, alignment entries, and complete Business Artifact and Catalog payloads. `SQLiteRepository` saves, retrieves and lists both complete record types in a persistent SQLite file, enforcing each Catalog's source association through a foreign key. `render_business_artifact` produces a complete deterministic Markdown view from a supplied artifact. Tests cover schemas, storage, association consistency, failed-commit rollback and Markdown text recovery through a CommonMark parser, including consistency across process restarts. `pyproject.toml` declares Python 3.12 or later and uses the `uv_build` backend; uv manages dependencies and pytest runs the tests. `markdown-it-py` is a development-only parser for rendering checks.
+The repository has a `src/catalyst_mcp/` package with a placeholder entry point and strict Pydantic 2 models for analysis and ideation inputs, generated content, alignment entries, and complete Business Artifact and Catalog payloads. `SQLiteRepository` saves, retrieves and lists both complete record types in a persistent SQLite file, enforcing each Catalog's source association through a foreign key. `render_business_artifact` and `render_use_case_catalog` produce complete deterministic Markdown views from supplied records. Tests cover schemas, storage, association consistency, failed-commit rollback and Markdown text recovery through a CommonMark parser, including consistency across process restarts. `pyproject.toml` declares Python 3.12 or later and uses the `uv_build` backend; uv manages dependencies and pytest runs the tests. `markdown-it-py` is a development-only parser for rendering checks.
 
-Catalog Markdown rendering, MCP handlers, resource readers and generation are not implemented. Metadata assignment, runtime database-path settings, source lookup before generation, exact source-element checks, exact requested-count checks, and configurable input-size and idea-count limits also remain unimplemented. The current repository accepts complete records supplied by callers and enforces source existence at save time; it does not execute either tool workflow. The Business Artifact renderer returns text directly; Markdown resource MIME types and routes have not been implemented or host-tested.
+MCP handlers, resource readers and generation are not implemented. Metadata assignment, runtime database-path settings, source lookup before generation, exact source-element checks, exact requested-count checks, and configurable input-size and idea-count limits also remain unimplemented. The current repository accepts complete records supplied by callers and enforces source existence at save time; it does not execute either tool workflow. Both renderers return text directly; Markdown resource MIME types and routes have not been implemented or host-tested.
 
 Open choices include:
 
