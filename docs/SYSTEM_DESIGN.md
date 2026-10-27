@@ -329,17 +329,18 @@ src/
       ideate_use_case.md
 tests/
   fixtures/                Synthetic business briefs and generated records
-  test_business_artifact.py Business Artifact schema and validation tests
-  test_use_case_catalog.py  Ideation, alignment and Catalog validation tests
-  test_analysis.py
-  test_ideation.py
-  test_repository.py       Business Artifact storage, restart and rollback tests
-  test_catalog_repository.py Catalog storage, source association and rollback tests
-  test_markdown_views.py
+  test_artifact_model.py       Business Artifact schema and validation tests
+  test_catalog_model.py        Ideation, alignment and Catalog validation tests
+  test_artifact_service.py
+  test_catalog_service.py
+  test_artifact_repository.py  Business Artifact storage, restart and rollback tests
+  test_catalog_repository.py   Catalog storage, source association and rollback tests
+  test_artifact_markdown.py
+  test_catalog_markdown.py
   test_mcp_flow.py
 ```
 
-The package entry point, Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and their tests in `test_business_artifact.py`, `test_use_case_catalog.py`, `test_repository.py` and `test_catalog_repository.py` currently exist. The repository creates both tables and enforces the Catalog-to-artifact foreign key. The other modules and test files above are proposed additions. Test examples currently live directly in those test modules; no fixtures directory has been added.
+The package entry point, Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and their tests in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py` and `test_catalog_repository.py` currently exist. The repository creates both tables and enforces the Catalog-to-artifact foreign key. The other modules and test files above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names. Test examples currently live directly in those test modules; no fixtures directory has been added.
 
 The prompt files contain backend generation instructions. They are not separately registered MCP Prompts in this MVP.
 

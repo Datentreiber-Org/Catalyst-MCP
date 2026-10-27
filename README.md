@@ -60,11 +60,11 @@ sections, alignment structure, metadata consistency, source associations, JSON
 round trips, process restart persistence and failure rollback. These local tests
 do not call a fake or live model provider or connect to an MCP host.
 
-- `tests/test_business_artifact.py` covers analysis input and Business
+- `tests/test_artifact_model.py` covers analysis input and Business
   Artifact validation.
-- `tests/test_use_case_catalog.py` covers ideation input,
+- `tests/test_catalog_model.py` covers ideation input,
   alignment entries and Use-case Catalog validation.
-- `tests/test_repository.py` covers Business Artifact storage, reads, listing,
+- `tests/test_artifact_repository.py` covers Business Artifact storage, reads, listing,
   restart persistence and failure atomicity.
 - `tests/test_catalog_repository.py` covers Catalog storage, source associations,
   restart persistence and failure atomicity.

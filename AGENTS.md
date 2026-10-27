@@ -31,6 +31,7 @@ Implement this complete flow:
 The proposed implementation uses one Python backend, the official MCP SDK, Pydantic, SQLite, local stdio and an LLM-provider adapter. These are design recommendations; document alternatives and their rationale before departing from them.
 
 - Follow the existing `src/catalyst_mcp/` package layout and Python requirements in `pyproject.toml`.
+- Name domain-specific test files `test_<domain>_<component>.py`. Use the short domains `artifact` and `catalog`, with singular component names such as `model` and `repository`: for example, `test_artifact_model.py` and `test_catalog_repository.py`. Follow this convention for future domain-specific tests as well.
 - Assign IDs, resource URIs, timestamps and source associations in backend code.
 - Expose each saved Business Artifact and Use-case Catalog as both JSON and an on-demand Markdown view.
 - Keep stored JSON as the source of truth. Render Markdown deterministically without another model call, a separately stored document, or a change to the saved record.
