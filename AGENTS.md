@@ -53,11 +53,11 @@ The proposed implementation uses one Python backend, the official MCP SDK, Pydan
 
 ## Implementation status
 
-The repository currently contains a placeholder entry point, a uv development setup, strict Business Artifact and Catalog models, and SQLite persistence for both record types with tests. Catalog source associations are enforced through a foreign key and checked against stored JSON on reads. MCP tools, resource readers, Markdown views, metadata assignment and model integration are not implemented. Runtime database-path settings, source lookup before generation, exact source-element and requested-count checks remain part of the later workflows. See the product document for open implementation choices.
+The repository currently contains a placeholder entry point, a uv development setup, strict Business Artifact and Catalog models, SQLite persistence for both record types, and a deterministic Business Artifact Markdown renderer with tests. Catalog source associations are enforced through a foreign key and checked against stored JSON on reads. Catalog Markdown rendering, MCP tools, resource readers, metadata assignment and model integration are not implemented. Runtime database-path settings, source lookup before generation, exact source-element and requested-count checks remain part of the later workflows. See the product document for open implementation choices.
 
 ## Implementation checklist
 
-Steps 1 through 5 are authorized and complete. Later steps remain unimplemented and require explicit authorization. Add only the dependencies, configuration, documentation, and tests needed by each authorized step.
+Steps 1 through 6 are authorized and complete. Later steps remain unimplemented and require explicit authorization. Add only the dependencies, configuration, documentation, and tests needed by each authorized step.
 
 Step 1 verification: Python 3.12.2, pytest 9.1.1, locked environment sync, package import, source-distribution and wheel builds, and placeholder command execution were verified. At that step, pytest collected zero tests and returned exit code 5 because no application tests existed yet.
 
@@ -69,12 +69,14 @@ Step 4 verification: 21 new repository cases passed alongside the 282 existing c
 
 Step 5 verification: 23 new Catalog repository cases passed alongside the 303 existing cases, for 326 passing tests on the same Python, SQLite, pytest and Pydantic versions. Checks cover adding the Catalog table to a step-4 database, complete save/get/list results, source foreign-key enforcement, missing sources, duplicate Catalog IDs, invalid mutated inputs, Catalog/source ID mismatches, unchanged JSON and timestamps after reads, cross-process persistence and failed-commit rollback. Both README storage examples ran successfully. These are local schema and real SQLite repository checks; no fake-provider, live-model or MCP-host checks were performed. Source lookup before generation, exact alignment matches and requested-count checks remain unimplemented.
 
+Step 6 verification: 58 new Business Artifact Markdown cases passed alongside the 326 existing cases, for 384 passing tests. CommonMark parsing with development dependency markdown-it-py 4.2.0 verifies all five metadata values, all 12 sections, explicit empty sections, array order, duplicate and long statements, literal Markdown/HTML, Unicode and preserved whitespace. Rendering is identical after repeated calls and a separate-process read; saved JSON, timestamps and files remain unchanged. The README storage/rendering examples, source-distribution and wheel builds, and wheel inclusion of the renderer succeeded; the parser is not a runtime wheel dependency. MIME types, MCP routes, Catalog rendering and host display have not been implemented or verified. No provider calls were made.
+
 - [x] 1. Verify Python 3.12+, repair package metadata's missing README, and establish the test setup.
 - [x] 2. Define and test Business Artifact input, generated-content, and saved-object models.
 - [x] 3. Define and test ideation input, generated-content, alignment, and Catalog models.
 - [x] 4. Add atomic Business Artifact storage, retrieval, and listing in SQLite.
 - [x] 5. Add Catalog storage, retrieval, and listing with enforced source associations.
-- [ ] 6. Render complete, deterministic Business Artifact Markdown.
+- [x] 6. Render complete, deterministic Business Artifact Markdown.
 - [ ] 7. Render complete, deterministic Catalog Markdown.
 - [ ] 8. Implement analysis generation, validation, bounded correction, and saving with a fake provider.
 - [ ] 9. Implement ideation from a saved artifact with exact count and alignment validation using a fake provider.

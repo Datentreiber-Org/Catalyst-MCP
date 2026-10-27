@@ -7,7 +7,8 @@ The repository currently contains a Python package with a placeholder command,
 a development setup, and validated Business Artifact and Use-case Catalog models
 with contract tests. Business Artifacts and Catalogs can be saved, read and listed
 through a SQLite repository, with Catalog source associations enforced by a
-foreign key. MCP tools, resource readers and model integration are not implemented yet.
+foreign key. Business Artifacts have a deterministic Markdown renderer. Catalog
+rendering, MCP tools, resource readers and model integration are not implemented yet.
 
 ## Development setup
 
@@ -57,8 +58,10 @@ The current tests cover analysis and ideation inputs, generated content and the
 complete Business Artifact and Catalog shapes, plus persistence of both record
 types in real temporary SQLite files. They check strict types, all 12 business-model
 sections, alignment structure, metadata consistency, source associations, JSON
-round trips, process restart persistence and failure rollback. These local tests
-do not call a fake or live model provider or connect to an MCP host.
+round trips, process restart persistence and failure rollback. Business Artifact
+Markdown tests parse the output as CommonMark and verify content preservation,
+escaping, completeness and determinism. These local tests do not call a fake or
+live model provider or connect to an MCP host.
 
 - `tests/test_artifact_model.py` covers analysis input and Business
   Artifact validation.
@@ -68,6 +71,11 @@ do not call a fake or live model provider or connect to an MCP host.
   restart persistence and failure atomicity.
 - `tests/test_catalog_repository.py` covers Catalog storage, source associations,
   restart persistence and failure atomicity.
+- `tests/test_artifact_markdown.py` covers the complete Business Artifact view,
+  literal text, deterministic rendering and unchanged saved records.
+
+`markdown-it-py` is a development dependency used to parse Markdown in tests.
+The production renderer uses Python's standard library and the existing models.
 
 ## Business Artifact models
 
@@ -224,6 +232,34 @@ their database columns. A Catalog has no `uri` field.
 Source existence is enforced when saving. Loading the source before generation,
 checking exact alignment-element matches and checking the requested idea count
 remain part of the later ideation workflow.
+
+## Business Artifact Markdown
+
+After the Business Artifact storage example, load the same saved record and
+render its Markdown view:
+
+```python
+from catalyst_mcp.markdown_views import render_business_artifact
+from catalyst_mcp.repository import SQLiteRepository
+
+repository = SQLiteRepository("data/catalyst.sqlite3")
+artifact = repository.get_business_artifact("ba_demo")
+print(render_business_artifact(artifact))
+```
+
+The result includes the name, ID, canonical JSON URI, both saved timestamps and
+all 12 business-model sections. For example, its Activities section is:
+
+```markdown
+## Activities
+
+- Repair bicycles
+```
+
+Empty sections contain `Not specified`. Text is escaped as literal content;
+multiline values remain within their original bullet. Rendering returns a string
+without calling a model, writing a Markdown file or changing the saved record.
+Catalog rendering and the MCP Markdown routes remain later steps.
 
 ## Build the package
 

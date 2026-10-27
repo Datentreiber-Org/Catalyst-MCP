@@ -1,6 +1,6 @@
 # Catalyst MVP system design
 
-Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence for both record types, and their tests are implemented. MCP integration, Markdown views and generation remain proposed work.
+Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence for both record types, the Business Artifact Markdown renderer, and their tests are implemented. Catalog rendering, MCP integration and generation remain proposed work.
 
 See [Product scope and requirements](PROJECT_CONTEXT.md) for the product contracts, scope and open choices. This document recommends implementation details, including create-only records, optional input focus, string-array entries, alignment objects and generation limits. These details remain proposals unless explicitly recorded as implementation decisions below.
 
@@ -221,6 +221,15 @@ Preserve the complete stored content and array order. Use a fixed order for the 
 
 Treat stored strings as document content and escape Markdown syntax or HTML where necessary to preserve the template structure. Rendering must not introduce raw active HTML or interpret stored text as instructions. Repeated reads of the same saved record with the same renderer version must produce the same Markdown. Do not add a current-time rendering timestamp.
 
+#### Recorded Business Artifact rendering decisions (step 6)
+
+- Add `render_business_artifact` in `markdown_views.py`, accepting a complete `BusinessArtifact` and returning Markdown text. Work from its JSON-compatible snapshot, preserving the existing metadata rather than generating new values.
+- Use a static document title and metadata bullets for name, ID, canonical JSON URI, `createdAt` and `updatedAt`. Follow these with the 12 human-readable section headings in documented order. Render every statement as a bullet and each empty section as "Not specified".
+- Escape Markdown punctuation and HTML-sensitive characters in supplied values. Represent internal newlines with hard line breaks and indent their continuation lines within the same bullet. Encode tabs, carriage returns, line-edge spaces and trailing newlines as character references so they are retained without becoming template syntax.
+- Keep rendering pure and deterministic: no provider calls, repository access, file writes, current-time timestamps or changes to the supplied artifact. Callers can load a saved artifact through the repository and pass it to the renderer.
+- Use `markdown-it-py` only as a development dependency. Tests parse CommonMark with HTML parsing enabled to verify literal text recovery, complete fields, section order and the absence of injected structure or active HTML.
+- Catalog rendering, resource discovery, MIME types and the `/view.md` reader remain later steps. This step adds no resource handler or separately stored document.
+
 MCP exposes content identified by URI through resource reads; storage remains the application's responsibility. See the [resource specification](https://modelcontextprotocol.io/specification/draft/server/resources).
 
 ## 5. Persistence
@@ -335,12 +344,12 @@ tests/
   test_catalog_service.py
   test_artifact_repository.py  Business Artifact storage, restart and rollback tests
   test_catalog_repository.py   Catalog storage, source association and rollback tests
-  test_artifact_markdown.py
+  test_artifact_markdown.py    Complete Business Artifact view and escaping checks
   test_catalog_markdown.py
   test_mcp_flow.py
 ```
 
-The package entry point, Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and their tests in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py` and `test_catalog_repository.py` currently exist. The repository creates both tables and enforces the Catalog-to-artifact foreign key. The other modules and test files above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names. Test examples currently live directly in those test modules; no fixtures directory has been added.
+The package entry point, Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and the Business Artifact renderer in `markdown_views.py` currently exist. Tests exist in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py`, `test_catalog_repository.py` and `test_artifact_markdown.py`. The repository creates both tables and enforces the Catalog-to-artifact foreign key; the renderer returns text without storage changes. The other modules and test files above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names. Test examples currently live directly in those test modules; no fixtures directory has been added.
 
 The prompt files contain backend generation instructions. They are not separately registered MCP Prompts in this MVP.
 
