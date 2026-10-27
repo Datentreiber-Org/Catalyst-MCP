@@ -1,6 +1,6 @@
 # Catalyst product scope and requirements
 
-Status: MVP requirements with a proposed implementation. Business Artifact and Use-case Catalog schemas and their contract tests are implemented; the tool workflows are not implemented.
+Status: MVP requirements with a proposed implementation. Business Artifact and Use-case Catalog schemas, Business Artifact SQLite persistence, and their tests are implemented; the tool workflows are not implemented.
 
 ## 1. Product purpose
 
@@ -98,6 +98,8 @@ The configurable upper idea-count limit (initially proposed as 10), exact reques
 
 Under the create-only proposal, `createdAt` and `updatedAt` are equal at creation. Repeated successful requests can create duplicate records; retry deduplication is not included. Creating an artifact does not automatically invoke ideation.
 
+Step 4 adopts Python's built-in `sqlite3` module for Business Artifact persistence. The repository takes an explicit persistent file path, stores complete validated JSON, and provides save, get-by-ID and listing operations. Saving an existing ID fails rather than replacing its record. A missing ID returns `None` internally, and lists are ordered by ID. Each successful save returns the complete validated artifact after commit; reads preserve saved content and timestamps. Catalog persistence remains step 5. See the [recorded persistence decisions](SYSTEM_DESIGN.md#recorded-business-artifact-persistence-decisions-step-4).
+
 ## 4. Domain and MCP concepts
 
 - **Business content:** text supplied for analysis. Input files and extracted text are not automatically registered MCP Resources.
@@ -159,9 +161,9 @@ The create-only MVP postpones these editing and propagation semantics.
 
 ## 8. Implementation status and open choices
 
-The repository has a `src/catalyst_mcp/` package with a placeholder entry point and strict Pydantic 2 models for analysis and ideation inputs, generated content, alignment entries, and complete Business Artifact and Catalog payloads. Contract tests cover these models. `pyproject.toml` declares Python 3.12 or later and uses the `uv_build` backend; uv manages dependencies and pytest runs the tests.
+The repository has a `src/catalyst_mcp/` package with a placeholder entry point and strict Pydantic 2 models for analysis and ideation inputs, generated content, alignment entries, and complete Business Artifact and Catalog payloads. `SQLiteRepository` saves, retrieves and lists complete Business Artifacts in a persistent SQLite file. Contract and repository tests cover these models and storage operations, including process restart persistence and failed-commit rollback. `pyproject.toml` declares Python 3.12 or later and uses the `uv_build` backend; uv manages dependencies and pytest runs the tests.
 
-MCP handlers, resource readers, persistence and generation are not implemented. Metadata assignment, source-existence and exact source-element checks, exact requested-count checks, and configurable input-size and idea-count limits also remain unimplemented; the current schemas only validate supplied values and local record consistency.
+Catalog persistence, MCP handlers, resource readers and generation are not implemented. Metadata assignment, runtime database-path settings, source-existence and exact source-element checks, exact requested-count checks, and configurable input-size and idea-count limits also remain unimplemented. The current repository accepts complete artifacts supplied by callers; it does not execute either tool workflow.
 
 Open choices include:
 
