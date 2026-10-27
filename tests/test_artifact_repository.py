@@ -44,16 +44,18 @@ def artifact() -> BusinessArtifact:
     )
 
 
-def test_creates_database_and_artifact_table(repository, database_path):
-    """Create missing directories and only the table required by this step."""
+def test_creates_database_tables(repository, database_path):
+    """Create missing directories and both tables without writing domain records."""
     assert database_path.is_file()
     with closing(sqlite3.connect(database_path, autocommit=True)) as connection:
         tables = connection.execute(
-            "SELECT name FROM sqlite_master WHERE type = 'table'"
+            "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name"
         ).fetchall()
-    assert tables == [("business_artifacts",)]
+    assert tables == [("business_artifacts",), ("use_case_catalogs",)]
     assert repository.list_business_artifacts() == []
     assert repository.get_business_artifact("unknown") is None
+    assert repository.list_use_case_catalogs() == []
+    assert repository.get_use_case_catalog("unknown") is None
 
 
 @pytest.mark.parametrize("path", ["", ":memory:", Path(":memory:")])
