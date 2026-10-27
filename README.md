@@ -5,9 +5,9 @@ then generate a saved Use-case Catalog linked to that artifact through MCP.
 
 The repository currently contains a Python package with a placeholder command,
 a development setup, and validated Business Artifact and Use-case Catalog models
-with contract tests. Business Artifacts can be saved, read and listed through a
-SQLite repository. Catalog persistence, MCP tools, resource readers and model
-integration are not implemented yet.
+with contract tests. Business Artifacts and Catalogs can be saved, read and listed
+through a SQLite repository, with Catalog source associations enforced by a
+foreign key. MCP tools, resource readers and model integration are not implemented yet.
 
 ## Development setup
 
@@ -54,17 +54,19 @@ uv run --locked pytest
 ```
 
 The current tests cover analysis and ideation inputs, generated content and the
-complete Business Artifact and Catalog shapes, plus Business Artifact persistence
-in real temporary SQLite files. They check strict types, all 12 business-model
-sections, alignment structure, metadata consistency, JSON round trips, process
-restart persistence and failure rollback. These local tests do not call a fake
-or live model provider or connect to an MCP host.
+complete Business Artifact and Catalog shapes, plus persistence of both record
+types in real temporary SQLite files. They check strict types, all 12 business-model
+sections, alignment structure, metadata consistency, source associations, JSON
+round trips, process restart persistence and failure rollback. These local tests
+do not call a fake or live model provider or connect to an MCP host.
 
 - `tests/test_business_artifact.py` covers analysis input and Business
   Artifact validation.
 - `tests/test_use_case_catalog.py` covers ideation input,
   alignment entries and Use-case Catalog validation.
 - `tests/test_repository.py` covers Business Artifact storage, reads, listing,
+  restart persistence and failure atomicity.
+- `tests/test_catalog_repository.py` covers Catalog storage, source associations,
   restart persistence and failure atomicity.
 
 ## Business Artifact models
@@ -123,7 +125,7 @@ alignment-element matches remain checks for the later ideation workflow.
 ## Business Artifact storage
 
 `SQLiteRepository` takes an explicit persistent file path and creates its parent
-directory and Business Artifact table if needed. With a new database, this
+directory and both record tables if needed. With a new database, this
 synthetic example saves a complete artifact and reads it through a new repository:
 
 ```python
@@ -163,6 +165,65 @@ IDs, timestamps, text and array order; callers supply the complete metadata.
 `get_business_artifact` returns `None` for an unknown ID, and listing returns
 complete artifacts ordered by ID. Invalid records and failed writes raise errors.
 The example database is covered by the repository's existing ignore rules.
+
+## Catalog storage
+
+After running the Business Artifact storage example, the same database contains
+the source `ba_demo`. This example supplies a complete synthetic Catalog linked
+to that saved artifact:
+
+```python
+from datetime import UTC, datetime
+
+from catalyst_mcp.models import UseCaseCatalog
+from catalyst_mcp.repository import SQLiteRepository
+
+timestamp = datetime(2026, 1, 1, tzinfo=UTC)
+catalog = UseCaseCatalog(
+    id="uc_catalog_demo",
+    createdAt=timestamp,
+    updatedAt=timestamp,
+    sourceArtifact={"id": "ba_demo"},
+    useCases=[{
+        "id": "uc_demo",
+        "title": "Repair request triage",
+        "focus": "Workshop efficiency",
+        "problem": "Staff manually route repair requests.",
+        "targetUsers": ["Workshop staff"],
+        "proposedSolution": "Classify repair requests and suggest a work queue.",
+        "businessElementAlignment": [{
+            "section": "activities",
+            "element": "Repair bicycles",
+            "rationale": "Routes repair work to workshop staff.",
+        }],
+    }],
+)
+
+repository = SQLiteRepository("data/catalyst.sqlite3")
+repository.save_use_case_catalog(catalog)
+reopened = SQLiteRepository("data/catalyst.sqlite3")
+loaded = reopened.get_use_case_catalog("uc_catalog_demo")
+print(loaded.sourceArtifact.id)
+print(loaded.useCases[0].title)
+print([record.id for record in reopened.list_use_case_catalogs()])
+```
+
+Output:
+
+```text
+ba_demo
+Repair request triage
+['uc_catalog_demo']
+```
+
+The repository returns the complete Catalog after commit, preserving its cases,
+source ID and timestamps. A missing source or duplicate Catalog ID raises
+`sqlite3.IntegrityError`. Reads validate the JSON and its Catalog/source IDs against
+their database columns. A Catalog has no `uri` field.
+
+Source existence is enforced when saving. Loading the source before generation,
+checking exact alignment-element matches and checking the requested idea count
+remain part of the later ideation workflow.
 
 ## Build the package
 

@@ -1,6 +1,6 @@
 # Catalyst MVP system design
 
-Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, Business Artifact SQLite persistence, and their tests are implemented. Catalog persistence, MCP integration, Markdown views and generation remain proposed work.
+Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence for both record types, and their tests are implemented. MCP integration, Markdown views and generation remain proposed work.
 
 See [Product scope and requirements](PROJECT_CONTEXT.md) for the product contracts, scope and open choices. This document recommends implementation details, including create-only records, optional input focus, string-array entries, alignment objects and generation limits. These details remain proposals unless explicitly recorded as implementation decisions below.
 
@@ -243,12 +243,21 @@ Store each domain record once as JSON. The Markdown representation is derived on
 ### Recorded Business Artifact persistence decisions (step 4)
 
 - Use `SQLiteRepository` in `repository.py` with Python's built-in `sqlite3` module. Take an explicit file path, resolve it once, create missing parent directories, and reject empty paths and `:memory:`. Runtime path configuration remains later work.
-- Create only `business_artifacts` in this step, with non-null `id` and `payload_json` columns and the ID as primary key. The Catalog table above remains step 5.
+- Step 4 initially creates `business_artifacts`, with non-null `id` and `payload_json` columns and the ID as primary key. Step 5 adds the Catalog table below.
 - `save_business_artifact` accepts a complete `BusinessArtifact`. Serialize and revalidate it before opening the write transaction, including objects that may have been mutated since construction. Use a parameterized `INSERT`; never replace an existing row. Return the complete validated artifact only after commit succeeds.
 - `get_business_artifact` returns a complete validated artifact or `None` for an unknown ID. `list_business_artifacts` returns complete artifacts ordered by ID. Both validate stored JSON and check that the payload ID equals its row ID. Invalid or inconsistent stored records raise errors rather than being repaired or skipped.
 - Open a fresh connection per operation and close it in `finally`. Enable foreign keys before starting transaction control with `autocommit=False`. A connection context commits on success and rolls back when the operation or commit fails.
 - Preserve record values, array order, IDs and timestamps. Reads do not save changes, and the repository does not generate metadata or business content.
 - Let SQLite, Pydantic validation and stored-ID mismatch errors propagate to callers. MCP-specific error mapping remains part of the later interface implementation.
+
+### Recorded Catalog persistence decisions (step 5)
+
+- Extend `SQLiteRepository` with `use_case_catalogs`: non-null `id`, `source_artifact_id` and `payload_json`, with the Catalog ID as primary key and the source ID referencing `business_artifacts(id)`. Create the table if missing, including when opening a database containing step-4 artifacts.
+- `save_use_case_catalog` accepts a complete `UseCaseCatalog`, serializes and revalidates it before opening the write transaction, and copies the validated payload's source ID into the foreign-key column. Use a parameterized insert and return the complete Catalog only after commit succeeds. Duplicate Catalog IDs and missing sources raise SQLite integrity errors; failed operations leave no partial record or changed source artifact.
+- Reuse the existing per-operation connections and transaction handling. Foreign-key enforcement protects the source association; no cascade or repository update/delete operations are introduced.
+- `get_use_case_catalog` returns a complete Catalog or `None` for an unknown ID. `list_use_case_catalogs` returns complete Catalogs ordered by ID. Decode and validate the JSON, then compare both the Catalog ID and source ID against their row columns; reject inconsistent stored records.
+- Keep the Catalog payload unchanged, without a `uri` field. Preserve source associations, all cases, content order, IDs and timestamps. Reads do not write domain data.
+- Enforcing source existence at save time does not replace the later ideation workflow's source lookup before generation, exact source-element matching or requested-count checks. The repository does not generate or assess use-case content.
 
 ## 6. Request execution
 
@@ -325,11 +334,12 @@ tests/
   test_analysis.py
   test_ideation.py
   test_repository.py       Business Artifact storage, restart and rollback tests
+  test_catalog_repository.py Catalog storage, source association and rollback tests
   test_markdown_views.py
   test_mcp_flow.py
 ```
 
-The package entry point, Business Artifact and Catalog models in `models.py`, Business Artifact persistence in `repository.py`, and their tests in `test_business_artifact.py`, `test_use_case_catalog.py` and `test_repository.py` currently exist. The repository currently creates only the Business Artifact table. The other modules and test files above are proposed additions. Test examples currently live directly in those test modules; no fixtures directory has been added.
+The package entry point, Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and their tests in `test_business_artifact.py`, `test_use_case_catalog.py`, `test_repository.py` and `test_catalog_repository.py` currently exist. The repository creates both tables and enforces the Catalog-to-artifact foreign key. The other modules and test files above are proposed additions. Test examples currently live directly in those test modules; no fixtures directory has been added.
 
 The prompt files contain backend generation instructions. They are not separately registered MCP Prompts in this MVP.
 
