@@ -7,8 +7,9 @@ The repository contains validated Business Artifact and Use-case Catalog models,
 SQLite persistence and deterministic Markdown renderers. A local stdio MCP server
 exposes `analyze-business-model` using scripted fake-provider responses. It
 validates generated content, assigns metadata and returns the complete committed
-Business Artifact. Ideation, MCP resource readers and live model integration
-remain unimplemented.
+Business Artifact. The ideation service validates exact idea counts and source
+references, then saves a complete Catalog with a scripted fake provider. Ideation
+exposure through MCP, resource readers and live model integration remain unimplemented.
 
 ## Development setup
 
@@ -150,9 +151,9 @@ types in real temporary SQLite files. They check strict types, all 12 business-m
 sections, alignment structure, metadata consistency, source associations, JSON
 round trips, process restart persistence and failure rollback. Markdown tests for
 both record types parse the output as CommonMark and verify content preservation,
-escaping, completeness and determinism. Analysis workflow tests use a scripted
-fake provider to check input limits, bounded correction, metadata and failure
-atomicity. MCP tests use the official client in process and real console-command
+escaping, completeness and determinism. Analysis and ideation workflow tests use
+scripted fake providers to check limits, bounded correction, metadata, exact idea
+counts, source-element matches and failure atomicity. MCP tests use the official client in process and real console-command
 subprocesses, checking discovery, complete results, failures, restart persistence
 and JSON-RPC stdout. No live model provider or selected AI host is exercised.
 
@@ -170,6 +171,8 @@ and JSON-RPC stdout. No live model provider or selected AI host is exercised.
   all case fields and alignments, literal text and unchanged saved records.
 - `tests/test_artifact_service.py` covers analysis with scripted responses,
   correction limits, provider failures and a real SQLite commit failure.
+- `tests/test_catalog_service.py` covers ideation from saved sources, exact counts
+  and alignments, limits, correction, source preservation and failed-commit rollback.
 - `tests/test_artifact_mcp.py` covers analysis discovery and schemas, strict
   arguments, safe failure results, CLI startup and real stdio exchanges.
 
@@ -226,9 +229,9 @@ Generated cases have no IDs. A complete `UseCase` adds its backend-supplied ID;
 `UseCaseCatalog` adds the catalog ID, equal UTC timestamps and `sourceArtifact.id`.
 Case IDs must be unique within the catalog, and the Catalog has no `uri` field.
 
-These schemas require a positive idea count. A configurable maximum (initially
-proposed as 10), the exact requested result count, source existence and exact
-alignment-element matches remain checks for the later ideation workflow.
+These schemas require a positive idea count. The ideation service below enforces
+a configurable maximum of 10 by default, checks source existence before generation,
+and validates the exact requested result count and source-element matches.
 
 ## Business Artifact storage
 
@@ -329,9 +332,8 @@ source ID and timestamps. A missing source or duplicate Catalog ID raises
 `sqlite3.IntegrityError`. Reads validate the JSON and its Catalog/source IDs against
 their database columns. A Catalog has no `uri` field.
 
-Source existence is enforced when saving. Loading the source before generation,
-checking exact alignment-element matches and checking the requested idea count
-remain part of the later ideation workflow.
+Source existence is enforced when saving. The ideation service also loads the
+source before generation and checks every alignment and the requested idea count.
 
 ## Business Artifact Markdown
 
@@ -468,8 +470,90 @@ insufficient-content `ValueError` without retrying. Provider and database failur
 propagate without a success result or a partially saved artifact.
 
 This verifies workflow behavior with a fake. Real analysis prompts, model quality,
-provider deadline enforcement, ideation, resource readers and selected-host
-integration remain later work.
+provider deadline enforcement, ideation exposure through MCP, resource readers and
+selected-host integration remain later work.
+
+## Ideation with a fake provider
+
+After the Business Artifact storage example, `ba_demo` contains the activity
+`Repair bicycles`. This example requests one idea from that saved artifact:
+
+```python
+import json
+
+from catalyst_mcp.llm_client import FakeIdeationProvider
+from catalyst_mcp.repository import SQLiteRepository
+from catalyst_mcp.services import ideate_use_case
+
+provider = FakeIdeationProvider(json.dumps({
+    "useCases": [{
+        "title": "Repair request triage",
+        "focus": "Workshop efficiency",
+        "problem": "Staff manually route repair requests.",
+        "targetUsers": ["Workshop staff"],
+        "proposedSolution": "Classify repair requests and suggest a work queue.",
+        "businessElementAlignment": [{
+            "section": "activities",
+            "element": "Repair bicycles",
+            "rationale": "Routes repair work to workshop staff.",
+        }],
+    }],
+}))
+repository = SQLiteRepository("data/catalyst.sqlite3")
+catalog = ideate_use_case(
+    "ba_demo", 1, focus="Workshop efficiency",
+    provider=provider, repository=repository,
+)
+print(catalog.sourceArtifact.id)
+print(catalog.useCases[0].title)
+print(len(catalog.useCases))
+print(repository.get_use_case_catalog(catalog.id) == catalog)
+```
+
+Output:
+
+```text
+ba_demo
+Repair request triage
+1
+True
+```
+
+The returned Catalog contains the complete cases, `sourceArtifact.id`, a new
+`uc_catalog_` UUID4 ID, a `uc_` UUID4 ID for each case and equal UTC timestamps.
+It has no `uri` field. The source artifact and its timestamps remain unchanged.
+The fake returns the supplied JSON; it does not create or evaluate ideas.
+
+The new code has four parts:
+
+- `IdeationProvider.generate_use_cases` declares the provider operation: receive
+  the saved artifact as JSON, the requested count, optional focus and separate
+  correction feedback; return JSON containing only `useCases`.
+- `FakeIdeationProvider.__init__` stores the response script and starts an empty
+  call history. Its `generate_use_cases` method records the arguments, then returns
+  the next JSON string or raises the scripted exception. Exhaustion raises `RuntimeError`.
+- `_validate_generated_use_cases` checks the exact count and every alignment in
+  every case. Each element must match a string in its named source section
+  exactly, including case, whitespace and Unicode characters.
+- `ideate_use_case` validates the request, loads the saved source, calls the
+  provider, validates its output, assigns metadata and saves the complete Catalog.
+  It returns the repository's result only after commit succeeds.
+
+The `max_number_of_ideas` keyword defaults to 10 and requires a positive integer.
+Invalid input raises `ValidationError`; a count above the configured maximum
+raises `ValueError`. A missing source raises `LookupError` before any provider call.
+Optional focus is preserved exactly, with omitted or `None` meaning no constraint.
+
+Malformed JSON, schema errors, wrong counts or invalid alignments get at most one
+corrective provider call. `_IDEATION_CORRECTION` supplies fixed backend feedback;
+source JSON, count and focus stay unchanged and rejected output is not included in
+the feedback. Two invalid responses raise `RuntimeError`. Provider, source-read
+and database-save failures propagate without generation retries or partial Catalogs.
+
+These fake-provider checks establish orchestration and valid references. They do
+not assess idea relevance, rationale quality or semantic focus compliance. The
+ideation MCP tool, CLI ideation scripts, live prompts, provider deadlines and real
+model evaluation remain later work.
 
 ## Build the package
 

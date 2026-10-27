@@ -1,6 +1,6 @@
 # Catalyst MVP system design
 
-Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence, deterministic Markdown rendering and the analysis workflow with a scripted fake provider are implemented and tested. The analysis tool is exposed over local MCP stdio. Resource readers, ideation and live generation remain proposed work; selected-host integration is unverified.
+Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence, deterministic Markdown rendering and both generation workflows with scripted fake providers are implemented and tested. The analysis tool is exposed over local MCP stdio. Ideation exposure through MCP, resource readers and live generation remain proposed work; selected-host integration is unverified.
 
 See [Product scope and requirements](PROJECT_CONTEXT.md) for the product contracts, scope and open choices. This document recommends implementation details, including create-only records, optional input focus, string-array entries, alignment objects and generation limits. These details remain proposals unless explicitly recorded as implementation decisions below.
 
@@ -150,13 +150,13 @@ The tool loads the artifact from the repository. It does not rely on the host to
 
 #### Recorded ideation and Catalog schema decisions (step 3)
 
-- Require a non-blank `artifactId` and a strictly positive integer `numberOfIdeas`. Reject booleans, numeric strings and floats as counts. The configurable maximum, initially proposed as 10, remains a later workflow check rather than a fixed schema bound.
+- Require a non-blank `artifactId` and a strictly positive integer `numberOfIdeas`. Reject booleans, numeric strings and floats as counts. Step 9 enforces the configurable maximum, defaulting to 10, in the workflow rather than as a fixed schema bound.
 - Allow input `focus` to be omitted or `null`. If text is supplied, require non-whitespace content and preserve it unchanged. The focus field on each generated or complete use case remains required non-blank text.
 - Require all six use-case content fields. `targetUsers` is an array of non-blank strings and may be empty; `businessElementAlignment` is an array with at least one entry. Each alignment requires `section`, `element` and `rationale`; `section` is one of the exact 12 business-model keys, and the other fields are non-blank strings.
 - Represent generated ideation content as an object containing only a non-empty `useCases` array. Generated cases cannot supply IDs; generated catalogs cannot supply metadata or a source association.
 - A complete use case adds a required backend-supplied `id` to the content fields. A complete Catalog requires `id`, timezone-aware UTC `createdAt` and `updatedAt`, `sourceArtifact` containing only its `id`, and a non-empty `useCases` array. Require equal creation timestamps and unique case IDs within the catalog.
 - Forbid unknown fields at every object level, including a Catalog `uri` field. Preserve supplied content and array order. These models validate supplied metadata; they do not assign it or save records.
-- Source existence, exact alignment-element matches and the exact requested idea count require the request and saved source artifact. They remain part of the later ideation workflow. Shape validation alone does not establish source support, business relevance or compliance with a requested focus.
+- Source existence, exact alignment-element matches and the exact requested idea count require the request and saved source artifact. Step 9 checks these in the ideation workflow. Shape validation alone does not establish source support, business relevance or compliance with a requested focus.
 
 ### businessElementAlignment structure
 
@@ -189,7 +189,7 @@ Return the full saved domain object in the tool result's `structuredContent`, co
 
 ### Recorded analysis MCP decisions (step 10)
 
-- Step 10 is authorized independently of step 9. Add only analysis discovery and execution; ideation remains unimplemented.
+- Step 10 was authorized before step 9. It adds only analysis discovery and execution; step 9 adds the ideation service and step 11 will expose it through MCP.
 - Select the official `mcp>=2.3.0,<3` dependency without CLI extras, recording the resolved version in `uv.lock`. Verify against the current [official SDK documentation](https://py.sdk.modelcontextprotocol.io/) and installed APIs.
 - Use the SDK's [low-level `Server`](https://py.sdk.modelcontextprotocol.io/advanced/low-level-server/) with `on_list_tools` and `on_call_tool` handlers in `server.py`. This allows reuse of the exact existing Pydantic input/output schemas and explicit strict argument validation, without the convenience layer's generated argument model or private SDK changes.
 - Advertise only `analyze-business-model`. Its sole input is `businessContent`; reject unknown fields and invalid types. Advertise and enforce the analysis service's default 20,000-character limit before generation, sharing that default as a named constant in `services.py`.
@@ -248,7 +248,7 @@ Treat stored strings as document content and escape Markdown syntax or HTML wher
 - Start with Catalog ID, saved timestamps, source artifact ID and its canonical JSON URI, computed as `catalyst://business-artifact/{sourceArtifact.id}`. Display the URI as escaped text, consistent with the artifact view; do not add URI fields to saved data.
 - Render each case under a numbered heading in array order. Include its ID, title, focus and problem, followed by Target users, Proposed solution and Business element alignment sections. Preserve target-user order and label an empty target-user list "Not specified".
 - Number alignment entries within each case and include every entry's exact section key, source element text and rationale. Keep duplicate entries and all content; view numbering identifies array positions rather than new domain IDs.
-- Keep rendering pure and deterministic, with no provider calls, source lookup, database access, file writes or new timestamps. Callers can load the Catalog through the repository before rendering it. Exact source-element matching remains a later workflow check.
+- Keep rendering pure and deterministic, with no provider calls, source lookup, database access, file writes or new timestamps. Callers can load the Catalog through the repository before rendering it. The ideation service checks exact source-element matching in step 9.
 - Verify parsed CommonMark structure, complete text, ordering, escaping and identical results after a process restart. Verify that both Catalog and source JSON, timestamps and saved files stay unchanged. MCP routes, MIME types and host display remain later integration work.
 
 MCP exposes content identified by URI through resource reads; storage remains the application's responsibility. See the [resource specification](https://modelcontextprotocol.io/specification/draft/server/resources).
@@ -287,7 +287,7 @@ Store each domain record once as JSON. The Markdown representation is derived on
 - Reuse the existing per-operation connections and transaction handling. Foreign-key enforcement protects the source association; no cascade or repository update/delete operations are introduced.
 - `get_use_case_catalog` returns a complete Catalog or `None` for an unknown ID. `list_use_case_catalogs` returns complete Catalogs ordered by ID. Decode and validate the JSON, then compare both the Catalog ID and source ID against their row columns; reject inconsistent stored records.
 - Keep the Catalog payload unchanged, without a `uri` field. Preserve source associations, all cases, content order, IDs and timestamps. Reads do not write domain data.
-- Enforcing source existence at save time does not replace the later ideation workflow's source lookup before generation, exact source-element matching or requested-count checks. The repository does not generate or assess use-case content.
+- Enforcing source existence at save time does not replace the ideation workflow's source lookup before generation, exact source-element matching or requested-count checks, implemented in step 9. The repository does not generate or assess use-case content.
 
 ## 6. Request execution
 
@@ -323,6 +323,17 @@ Store each domain record once as JSON. The Markdown representation is derived on
 7. Return the same saved catalog to the host.
 
 The host invokes the tools separately. Creating an artifact does not itself trigger ideation.
+
+#### Recorded ideation workflow decisions (step 9)
+
+- Add synchronous `ideate_use_case` to `services.py`. Validate the existing `IdeateUseCaseInput` contract, with a positive integer `max_number_of_ideas` keyword defaulting to 10. Reject requests above that limit before source lookup or generation. Keep runtime limits outside the standalone schema; environment settings remain later work.
+- Load the complete saved Business Artifact by ID. Raise a fixed `LookupError` if missing and propagate unreadable or inconsistent source-record errors without calling the provider. Do not reconstruct the source from chat text or run analysis automatically.
+- Add `IdeationProvider.generate_use_cases` and a separate `FakeIdeationProvider` in `llm_client.py`. Pass the saved artifact as an immutable JSON string, with the exact requested count, optional focus and backend correction as separate arguments. This preserves source data and avoids handing mutable repository models to the provider. A live adapter must treat supplied source/focus as data and honor the requested focus; the fake only returns scripted JSON or raises scripted exceptions.
+- Validate provider JSON with `GeneratedUseCaseCatalog`, then require exactly the requested number of cases and check every alignment in every case. Each element must match a string in its named source section exactly, without trimming, case folding or Unicode normalization. Preserve generated content and array order; do not impose duplicate-idea restrictions or require the output focus label to equal the input text. Semantic focus compliance, rationale quality and idea relevance require later live evaluation.
+- Allow at most one corrective provider call for malformed JSON, schema errors, wrong counts or invalid alignments. Keep the source JSON, count and focus unchanged and send fixed backend-authored feedback without copying rejected output or validation-error values into instructions. If both responses fail, raise a fixed `RuntimeError` and save no Catalog.
+- After validation, assign `uc_catalog_` plus UUID4 hex for the Catalog and `uc_` plus UUID4 hex per case. Use one UTC timestamp for both Catalog timestamps and the loaded artifact ID for `sourceArtifact.id`. Do not add a Catalog URI field. Save through the existing repository and return its complete result only after commit.
+- Provider, source-read and database-save failures propagate without generation retries or success results. Keep generation and validation outside the write transaction and leave the source record unchanged. The database foreign key remains the final source-existence check at save time.
+- Verify orchestration with scripted fake responses and real temporary SQLite files, including source matching, correction bounds, source preservation, restart reads and failed-commit rollback. Step 9 adds no MCP registration, CLI ideation responses, resource routes, real prompts or provider deadlines; those remain later steps.
 
 ### Resource read
 
@@ -382,7 +393,7 @@ tests/
   test_mcp_flow.py
 ```
 
-The package entry point runs the stdio development server. Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and both renderers in `markdown_views.py` exist. `services.py` implements analysis only; `llm_client.py` contains its provider interface and scripted fake, with no live adapter yet. `server.py` registers analysis only, with strict schemas and complete committed results. Tests exist in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py`, `test_catalog_repository.py`, `test_artifact_markdown.py`, `test_catalog_markdown.py`, `test_artifact_service.py` and `test_artifact_mcp.py`. The repository creates both tables and enforces the Catalog-to-artifact foreign key; the renderers return text without storage changes. The other modules and test files above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names; the single-tool MCP tests use the `artifact` domain until a two-tool flow exists. Test examples currently live directly in those test modules; no fixtures directory has been added.
+The package entry point runs the stdio development server. Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and both renderers in `markdown_views.py` exist. `services.py` implements analysis and ideation; `llm_client.py` contains their provider interfaces and scripted fakes, with no live adapter yet. `server.py` registers analysis only, with strict schemas and complete committed results. Tests exist in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py`, `test_catalog_repository.py`, `test_artifact_markdown.py`, `test_catalog_markdown.py`, `test_artifact_service.py`, `test_catalog_service.py` and `test_artifact_mcp.py`. The repository creates both tables and enforces the Catalog-to-artifact foreign key; the renderers return text without storage changes. The other modules and test files above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names; the single-tool MCP tests use the `artifact` domain until a two-tool flow exists. Test examples currently live directly in those test modules; no fixtures directory has been added.
 
 The prompt files contain backend generation instructions. They are not separately registered MCP Prompts in this MVP.
 
