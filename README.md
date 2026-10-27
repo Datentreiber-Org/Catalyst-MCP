@@ -7,7 +7,8 @@ The repository contains validated Business Artifact and Use-case Catalog models,
 SQLite persistence and deterministic Markdown renderers. A local stdio MCP server
 exposes `analyze-business-model` and `ideate-use-case` using scripted fake-provider
 responses. Both return complete committed records. Ideation validates the exact
-idea count and every source reference before saving its Catalog. Resource readers,
+idea count and every source reference before saving its Catalog. Both saved types
+can be listed and read as canonical JSON resources. Markdown resource routes,
 resource links and live model integration remain unimplemented.
 
 ## Development setup
@@ -61,8 +62,9 @@ The server advertises exactly two tools, both rejecting extra input fields:
 A successful call returns the complete saved artifact or Catalog as
 `structuredContent` and matching JSON text, conforming to its `outputSchema`. A
 Catalog has no `uri` field. Failures have
-`isError: true` and no structured success payload. Resources and resource links
-remain later steps; the canonical URI is already present inside the artifact.
+`isError: true` and no structured success payload. Canonical JSON resources are
+available through `resources/list` and `resources/read`; Markdown routes and links
+in tool results remain later work. The artifact's canonical URI stays in its payload.
 
 The server uses the [official MCP Python SDK](https://py.sdk.modelcontextprotocol.io/),
 version 2.3.0 recorded in `uv.lock`, with its documented
@@ -259,6 +261,8 @@ counts, source-element matches and failure atomicity. MCP tests use the official
 subprocesses, checking discovery, complete results, failures, restart persistence
 and JSON-RPC stdout. The full two-tool sequence and ideation after process restart
 are also exercised. No live model provider or selected AI host is exercised.
+JSON resource checks verify complete data, MIME types, exact URI matching,
+safe protocol errors, unchanged stored records and reads without provider calls.
 
 - `tests/test_artifact_model.py` covers analysis input and Business
   Artifact validation.
@@ -281,7 +285,9 @@ are also exercised. No live model provider or selected AI host is exercised.
 - `tests/test_catalog_mcp.py` covers ideation discovery and schemas, strict
   arguments, saved-source handling, complete results, correction and failed commits.
 - `tests/test_mcp_flow.py` covers both tools through real stdio, independent scripts,
-  ideation after restart and rejected count/alignment output.
+  ideation after restart, rejected count/alignment output and JSON resources after restart.
+- `tests/test_mcp_resource.py` covers JSON discovery and reads, exact canonical
+  URIs, complete payloads, MIME types, safe errors and unchanged data/files.
 
 `markdown-it-py` is a development dependency used to parse Markdown in tests.
 The production renderer uses Python's standard library and the existing models.
@@ -442,6 +448,91 @@ their database columns. A Catalog has no `uri` field.
 Source existence is enforced when saving. The ideation service also loads the
 source before generation and checks every alignment and the requested idea count.
 
+## JSON resources over MCP
+
+After the two storage examples, the database contains `ba_demo` and
+`uc_catalog_demo`. This example starts a new server with no provider scripts and
+reads their canonical JSON resources:
+
+```python
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+from mcp import Client
+from mcp.client.stdio import StdioServerParameters
+
+from catalyst_mcp.repository import SQLiteRepository
+
+database_path = Path("data/catalyst.sqlite3").resolve()
+
+
+async def demonstrate_json_resources():
+    """Discover JSON resources and verify both complete records after restart."""
+    parameters = StdioServerParameters(
+        command=str(Path(sys.executable).with_name("catalyst-mcp")),
+        args=["--database", str(database_path)],
+    )
+    async with Client(parameters, read_timeout_seconds=10) as client:
+        listing = await client.list_resources()
+        assert listing.next_cursor is None
+        print([resource.mime_type for resource in listing.resources])
+        artifact_result = await client.read_resource("catalyst://business-artifact/ba_demo")
+        catalog_result = await client.read_resource("catalyst://use-case-catalog/uc_catalog_demo")
+        artifact_content = artifact_result.contents[0]
+        catalog_content = catalog_result.contents[0]
+        assert artifact_content.mime_type == catalog_content.mime_type == "application/json"
+        artifact = json.loads(artifact_content.text)
+        catalog = json.loads(catalog_content.text)
+        print(artifact["name"])
+        print(catalog["useCases"][0]["title"])
+    repository = SQLiteRepository(database_path)
+    print(
+        repository.get_business_artifact("ba_demo").model_dump(mode="json") == artifact
+        and repository.get_use_case_catalog("uc_catalog_demo").model_dump(mode="json") == catalog
+    )
+
+
+asyncio.run(demonstrate_json_resources())
+```
+
+Output printed by the client:
+
+```text
+['application/json', 'application/json']
+Northstar Bikes
+Repair request triage
+True
+```
+
+Each read returns one text content item whose URI equals the requested canonical
+URI, whose MIME type is `application/json` and whose text contains the complete
+saved JSON. The final `True` verifies both complete records, including metadata,
+all 12 business-model sections, every case and every alignment. The Catalog still
+has no `uri` field; its resource URI is constructed in the MCP layer.
+
+The resource code in `server.py` has five small functions:
+
+- `_list_json_resources` loads validated records and creates JSON resource
+  descriptions. Artifacts come first in ID order, followed by Catalogs in ID order.
+- `_read_json_resource` matches a literal canonical prefix, loads the exact saved
+  ID and serializes the full record. It does not decode URI escapes, normalize IDs
+  or perform filesystem lookups.
+- `_resource_error` logs a fixed operation summary and constructs an MCP protocol
+  error without copying URI values, stored content or exception details into it.
+- `list_resources` runs discovery in a worker thread and returns a single page.
+  An explicit cursor is rejected; pagination and change notifications are not enabled.
+- `read_resource` runs the read in a worker thread and returns the JSON content
+  or a protocol error. Missing/unsupported resources use `-32602`; database or
+  invalid-record failures use `-32603`, following the current
+  [resource error contract](https://modelcontextprotocol.io/specification/draft/server/resources#error-handling).
+
+Listing and reading make no provider calls, writes or new timestamps. JSON reads
+preserve stored text, field names and array order. `/view.md` resources and tool
+result links remain step 13; the existing Markdown renderers still work directly
+in Python as shown below. Live-model and selected-host checks remain separate.
+
 ## Business Artifact Markdown
 
 After the Business Artifact storage example, load the same saved record and
@@ -577,7 +668,7 @@ insufficient-content `ValueError` without retrying. Provider and database failur
 propagate without a success result or a partially saved artifact.
 
 This verifies workflow behavior with a fake. Real analysis prompts, model quality,
-provider deadline enforcement, resource readers and
+provider deadline enforcement, Markdown resource routes and
 selected-host integration remain later work.
 
 ## Ideation with a fake provider
@@ -660,7 +751,7 @@ and database-save failures propagate without generation retries or partial Catal
 
 These fake-provider checks establish orchestration and valid references. They do
 not assess idea relevance, rationale quality or semantic focus compliance. The
-resource readers/links, live prompts, provider deadlines and real model evaluation
+Markdown resource routes/links, live prompts, provider deadlines and real model evaluation
 remain later work. Both tools are exposed through MCP with independent CLI scripts.
 
 ## Build the package

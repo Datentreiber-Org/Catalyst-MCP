@@ -1,6 +1,6 @@
 # Catalyst MVP system design
 
-Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence, deterministic Markdown rendering and both generation workflows with scripted fake providers are implemented and tested. Both tools are exposed over local MCP stdio, including verification of the complete fake-provider flow. Resource readers/links and live generation remain proposed work; selected-host integration is unverified.
+Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence, deterministic Markdown rendering and both generation workflows with scripted fake providers are implemented and tested. Both tools and canonical JSON resource listing/reads are exposed over local MCP stdio, including restart verification. Markdown resource routes/links and live generation remain proposed work; selected-host integration is unverified.
 
 See [Product scope and requirements](PROJECT_CONTEXT.md) for the product contracts, scope and open choices. This document recommends implementation details, including create-only records, optional input focus, string-array entries, alignment objects and generation limits. These details remain proposals unless explicitly recorded as implementation decisions below.
 
@@ -207,7 +207,7 @@ Return the full saved domain object in the tool result's `structuredContent`, co
 - Make `_tool_error` take the known operation name so stderr logs identify the correct tool without echoing untrusted tool names, arguments or provider details. Successful logs include only the operation and record ID. Continue running synchronous service calls with `asyncio.to_thread` and reserve stdout for MCP messages.
 - Keep `--fake-response` for analysis and add repeatable `--fake-ideation-response` for ideation. Each supplies an independent ordered script, including corrective calls. Both options are optional; an omitted or exhausted script fails when that provider is called, without affecting the other script. This permits ideation-only startup against a saved artifact. `--database` stays required, and unreadable response files fail startup before opening the database.
 - Verify discovery, complete results, strict inputs, source handling, independent scripts, correction bounds and failure atomicity with the official SDK client and real temporary SQLite. Exercise the full two-tool sequence and ideation after a process restart through the actual stdio command, checking every stdout line as JSON-RPC and source/Catalog persistence.
-- This step exposes the fake-provider workflows only. Resource listing/reading, links, real adapters/prompts, deadline enforcement and selected-host verification remain later work.
+- Step 11 exposes the fake-provider workflows. Step 12 adds canonical JSON listing/reading; Markdown routes/links, real adapters/prompts, deadline enforcement and selected-host verification remain later work.
 
 ### Resource representations and discovery
 
@@ -229,6 +229,17 @@ These four URI patterns cover two stored object types. The `/view.md` suffix ide
 - A JSON read returns the saved domain object serialized as JSON. A Markdown read formats the same saved object as Markdown text.
 - Both resource-read paths use the repository and never call the LLM, modify the saved record, or change its timestamps.
 - Host support determines whether Markdown is displayed with formatting or as plain text. A custom UI is not required.
+
+### Recorded JSON resource decisions (step 12)
+
+- Add `on_list_resources` and `on_read_resource` to the existing SDK `Server` in `server.py`. Verify the resource types and callbacks against the [official SDK API](https://py.sdk.modelcontextprotocol.io/servers/resources/) and installed MCP 2.3.0. No dependency or domain-payload changes are needed.
+- List one JSON resource per saved Business Artifact and Catalog, with `application/json`. Use the artifact's existing canonical `uri`; construct the Catalog URI as `catalyst://use-case-catalog/{id}` only in the MCP layer. Label resource names with their record identity and JSON format. Return artifacts in ID order followed by Catalogs in ID order, using the existing repository lists.
+- Return the complete listing in one page without `nextCursor`. Reject a supplied cursor as `INVALID_PARAMS`; do not add pagination, subscriptions, list-change notifications or resource templates. The SDK derives the resources capability from the new handlers, with optional notification/subscription flags false.
+- Resolve literal canonical URI prefixes and the exact remaining saved ID, without URL decoding, normalization, aliases or filesystem operations. Backend UUID identifiers and existing canonical URI values remain unchanged. Unsupported or missing identifiers return a resource-not-found protocol error; no empty success contents are returned.
+- Load and validate through the existing repository, then return one `TextResourceContents` item with the requested URI, `application/json` and the complete JSON serialization. Run database access and serialization in worker threads. Listing/reading must not call either provider, generate metadata, save a record or change JSON/timestamps.
+- Use `MCPError` with the SDK's documented current `INVALID_PARAMS` code (`-32602`) for missing/unsupported resources and invalid cursors, and `INTERNAL_ERROR` (`-32603`) for unreadable or inconsistent saved data and database failures. Keep client messages and stderr summaries fixed, without raw URIs, stored values or exception details. This follows the [current resource error contract](https://modelcontextprotocol.io/specification/draft/server/resources#error-handling); earlier protocol revisions recommended `-32002`, which current clients also recognize.
+- Verify empty/mixed listings, completeness and MIME types, literal text, deterministic ordering, exact URI matching, missing/corrupt records, safe failures, unchanged stored JSON/timestamps and zero provider calls. Extend real stdio flow checks to list/read created records and read both types after restart with no response scripts configured.
+- Step 12 advertises canonical JSON only. Markdown routes and links in tool results remain step 13; live-model and selected-host verification remain separate work.
 
 ### Markdown rendering
 
@@ -402,9 +413,10 @@ tests/
   test_artifact_markdown.py    Complete Business Artifact view and escaping checks
   test_catalog_markdown.py     Complete Catalog view, source references and escaping checks
   test_mcp_flow.py
+  test_mcp_resource.py         Canonical JSON discovery, reads and failure checks
 ```
 
-The package entry point runs the stdio development server. Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and both renderers in `markdown_views.py` exist. `services.py` implements analysis and ideation; `llm_client.py` contains their provider interfaces and scripted fakes, with no live adapter yet. `server.py` registers both tools with strict schemas and complete committed results. Tests exist in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py`, `test_catalog_repository.py`, `test_artifact_markdown.py`, `test_catalog_markdown.py`, `test_artifact_service.py`, `test_catalog_service.py`, `test_artifact_mcp.py`, `test_catalog_mcp.py` and the cross-domain `test_mcp_flow.py`. The repository creates both tables and enforces the Catalog-to-artifact foreign key; the renderers return text without storage changes. The other modules and directories above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names. Test examples currently live directly in those test modules; no fixtures directory has been added.
+The package entry point runs the stdio development server. Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and both renderers in `markdown_views.py` exist. `services.py` implements analysis and ideation; `llm_client.py` contains their provider interfaces and scripted fakes, with no live adapter yet. `server.py` registers both tools with complete committed results and both canonical JSON resource types with listing/read callbacks. Tests exist in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py`, `test_catalog_repository.py`, `test_artifact_markdown.py`, `test_catalog_markdown.py`, `test_artifact_service.py`, `test_catalog_service.py`, `test_artifact_mcp.py`, `test_catalog_mcp.py` and the cross-domain `test_mcp_flow.py` and `test_mcp_resource.py`. The repository creates both tables and enforces the Catalog-to-artifact foreign key; the renderers return text without storage changes. The other modules and directories above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names. Test examples currently live directly in those test modules; no fixtures directory has been added.
 
 The prompt files contain backend generation instructions. They are not separately registered MCP Prompts in this MVP.
 

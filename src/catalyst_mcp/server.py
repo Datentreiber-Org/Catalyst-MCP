@@ -1,18 +1,26 @@
-"""Stdio MCP interface for analysis and ideation workflows."""
+"""Stdio MCP tools and canonical JSON resources for saved records."""
 
 import asyncio
 import logging
 import sqlite3
 from importlib.metadata import version
 
+from mcp import MCPError
 from mcp.server import Server, ServerRequestContext
 from mcp.server.stdio import stdio_server
 from mcp.types import (
+    INTERNAL_ERROR,
+    INVALID_PARAMS,
     CallToolRequestParams,
     CallToolResult,
     ListToolsResult,
+    ListResourcesResult,
     PaginatedRequestParams,
+    ReadResourceRequestParams,
+    ReadResourceResult,
+    Resource,
     TextContent,
+    TextResourceContents,
     Tool,
 )
 from pydantic import ValidationError
@@ -35,6 +43,8 @@ from catalyst_mcp.services import (
 
 
 logger = logging.getLogger(__name__)
+_ARTIFACT_JSON_PREFIX = "catalyst://business-artifact/"
+_CATALOG_JSON_PREFIX = "catalyst://use-case-catalog/"
 
 
 def _tool_error(tool_name: str, message: str) -> CallToolResult:
@@ -43,6 +53,44 @@ def _tool_error(tool_name: str, message: str) -> CallToolResult:
     return CallToolResult(
         content=[TextContent(type="text", text=message)], is_error=True
     )
+
+
+def _resource_error(operation: str, code: int, message: str) -> MCPError:
+    """Log a fixed summary and construct a resource protocol error."""
+    logger.warning("%s failed: %s", operation, message)
+    return MCPError(code=code, message=message)
+
+
+def _list_json_resources(repository: SQLiteRepository) -> list[Resource]:
+    """Describe all saved records as JSON, in record-type then ID order."""
+    resources = [
+        Resource(
+            uri=artifact.uri,
+            name=f"{artifact.name} ({artifact.id}, JSON)",
+            mime_type="application/json",
+        )
+        for artifact in repository.list_business_artifacts()
+    ]
+    resources.extend(
+        Resource(
+            uri=f"{_CATALOG_JSON_PREFIX}{catalog.id}",
+            name=f"Use-case Catalog {catalog.id} (JSON)",
+            mime_type="application/json",
+        )
+        for catalog in repository.list_use_case_catalogs()
+    )
+    return resources
+
+
+def _read_json_resource(repository: SQLiteRepository, uri: str) -> str | None:
+    """Read one literal canonical URI and serialize its complete saved object."""
+    if uri.startswith(_ARTIFACT_JSON_PREFIX):
+        record = repository.get_business_artifact(uri[len(_ARTIFACT_JSON_PREFIX):])
+    elif uri.startswith(_CATALOG_JSON_PREFIX):
+        record = repository.get_use_case_catalog(uri[len(_CATALOG_JSON_PREFIX):])
+    else:
+        return None
+    return record.model_dump_json() if record is not None else None
 
 
 def create_server(
@@ -176,11 +224,39 @@ def create_server(
             return await ideate(params.arguments)
         return _tool_error("tools/call", "Unknown tool.")
 
+    async def list_resources(
+        ctx: ServerRequestContext, params: PaginatedRequestParams | None
+    ) -> ListResourcesResult:
+        """Advertise the current saved JSON records as one complete page."""
+        if params is not None and params.cursor is not None:
+            raise _resource_error("resources/list", INVALID_PARAMS, "Resource listing does not accept a cursor.")
+        try:
+            resources = await asyncio.to_thread(_list_json_resources, repository)
+        except Exception:
+            raise _resource_error("resources/list", INTERNAL_ERROR, "Could not list saved resources.") from None
+        return ListResourcesResult(resources=resources)
+
+    async def read_resource(
+        ctx: ServerRequestContext, params: ReadResourceRequestParams
+    ) -> ReadResourceResult:
+        """Return complete JSON or a fixed protocol error without writing data."""
+        try:
+            payload = await asyncio.to_thread(_read_json_resource, repository, params.uri)
+        except Exception:
+            raise _resource_error("resources/read", INTERNAL_ERROR, "Could not read saved resource.") from None
+        if payload is None:
+            raise _resource_error("resources/read", INVALID_PARAMS, "Resource not found.")
+        return ReadResourceResult(contents=[
+            TextResourceContents(uri=params.uri, mime_type="application/json", text=payload)
+        ])
+
     return Server(
         "Catalyst",
         version=version("catalyst-mcp"),
         on_list_tools=list_tools,
         on_call_tool=call_tool,
+        on_list_resources=list_resources,
+        on_read_resource=read_resource,
     )
 
 

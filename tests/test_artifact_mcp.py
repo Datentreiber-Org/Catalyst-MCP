@@ -266,7 +266,7 @@ def test_stdio_command_and_restart_preserve_results(database_path, response_path
     assert initialized["serverInfo"]["name"] == "Catalyst"
     assert initialized["protocolVersion"] == "2025-06-18"
     assert "tools" in initialized["capabilities"]
-    assert "resources" not in initialized["capabilities"]
+    assert initialized["capabilities"]["resources"] == {"subscribe": False, "listChanged": False}
     assert "prompts" not in initialized["capabilities"]
     assert [tool["name"] for tool in tools["tools"]] == ["analyze-business-model", "ideate-use-case"]
     assert "outputSchema" in tools["tools"][0]
