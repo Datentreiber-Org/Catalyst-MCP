@@ -1,8 +1,8 @@
 # Catalyst MVP system design
 
-Status: proposed implementation design for the two-tool MVP. Python package scaffolding exists; the functionality described here is not implemented.
+Status: implementation design for the two-tool MVP. Business Artifact schemas and their contract tests are implemented. MCP integration, Catalog schemas, persistence, Markdown views and generation remain proposed work.
 
-See [Product scope and requirements](PROJECT_CONTEXT.md) for the product contracts, scope and open choices. This document recommends implementation details, including create-only records, optional input focus, string-array entries, alignment objects and generation limits. These details remain proposals until recorded as implementation decisions.
+See [Product scope and requirements](PROJECT_CONTEXT.md) for the product contracts, scope and open choices. This document recommends implementation details, including create-only records, optional input focus, string-array entries, alignment objects and generation limits. These details remain proposals unless explicitly recorded as implementation decisions below.
 
 ## 1. Goal and operating model
 
@@ -97,6 +97,16 @@ businessModel:
 All 12 sections are present. Unspecified sections contain empty arrays. Strings contain individual business-model statements. The analysis instructions require source-supported content and must not request fabricated entries to fill empty sections.
 
 The LLM generates only `name` and `businessModel`. The backend assigns `id`, `uri`, `createdAt` and `updatedAt` after validating the generated content.
+
+#### Recorded Business Artifact schema decisions (step 2)
+
+- Use strict Pydantic 2 models with extra fields forbidden at every object level. Preserve the documented field names directly, including `businessContent` and `businessModel`.
+- Require all 12 business-model sections as arrays of non-blank strings. Do not fill missing fields automatically. An empty array represents an unspecified section, but an entirely empty model is invalid.
+- Require non-whitespace content for input text, names, IDs, URIs and section statements. Preserve accepted text and array order; validation does not trim, summarize or normalize business content.
+- Separate analysis input, generated content and the complete Business Artifact. Generated content cannot supply IDs, URIs or timestamps. The complete artifact requires every metadata field; these schemas do not generate metadata or persist records.
+- Validate the artifact URI against its ID using `catalyst://business-artifact/{id}`. Require timezone-aware timestamps with a zero UTC offset and equal `createdAt` and `updatedAt` values for create-only artifacts.
+- Use Python `datetime` objects when constructing complete artifacts in backend code. Use `model_validate_json` for JSON timestamp strings and `model_dump_json` or `model_dump(mode="json")` for JSON serialization.
+- Leave configurable input-size enforcement to the later analysis workflow. These schemas validate structure and content presence; they do not verify source support or business relevance.
 
 ### ideate-use-case
 
@@ -290,6 +300,7 @@ src/
       ideate_use_case.md
 tests/
   fixtures/                Synthetic business briefs and generated records
+  test_models.py           Business Artifact schema and validation tests
   test_analysis.py
   test_ideation.py
   test_repository.py
@@ -297,7 +308,7 @@ tests/
   test_mcp_flow.py
 ```
 
-Only the package scaffolding currently exists; the modules and tests above are proposed additions.
+The package entry point, Business Artifact models in `models.py`, and their tests in `test_models.py` currently exist. The other modules and test files above are proposed additions. Test examples currently live directly in `test_models.py`; no fixtures directory has been added.
 
 The prompt files contain backend generation instructions. They are not separately registered MCP Prompts in this MVP.
 

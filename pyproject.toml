@@ -7,7 +7,9 @@ authors = [
     { name = "ki94mach", email = "kian.mohajeri@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "pydantic>=2,<3",
+]
 
 [project.scripts]
 catalyst-mcp = "catalyst_mcp:main"

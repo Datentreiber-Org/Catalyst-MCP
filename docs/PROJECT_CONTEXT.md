@@ -1,6 +1,6 @@
 # Catalyst product scope and requirements
 
-Status: MVP requirements with a proposed implementation. The repository currently contains Python package scaffolding; the core functionality is not implemented.
+Status: MVP requirements with a proposed implementation. Business Artifact schemas and their contract tests are implemented; the tool workflows are not implemented.
 
 ## 1. Product purpose
 
@@ -86,7 +86,11 @@ The [system design](SYSTEM_DESIGN.md) provides the following implementation base
 | Invalid generation | At most one corrective generation attempt |
 | MCP result | Complete object in `structuredContent`, JSON text and a resource link |
 
-The focus input's optionality, array item types, alignment entry structure and operational limits remain proposed contract details. The implementation should record their resolution before exposing a stable API.
+Step 2 adopts `businessContent` as the analysis input name and arrays of non-blank strings for all 12 business-model sections. Every section is required; an unspecified section is an explicit empty array. At least one section must contain a statement. Input text, artifact names and statements must contain non-whitespace text, and accepted text is preserved without trimming or rewriting. Unknown fields and incorrect types are rejected.
+
+Generated Business Artifact content contains only `name` and `businessModel`. The complete artifact requires backend-supplied metadata: `uri` must equal `catalyst://business-artifact/{id}`, and both timestamps must be timezone-aware UTC values and equal under the create-only contract. Schema validation does not assign metadata or save a record. See the [recorded schema decisions](SYSTEM_DESIGN.md#recorded-business-artifact-schema-decisions-step-2) for the Python and JSON representations.
+
+The focus input's optionality, alignment entry structure and operational limits remain proposed contract details. The configurable business-content size limit will be implemented with the analysis workflow, rather than fixed in these schemas.
 
 Under the create-only proposal, `createdAt` and `updatedAt` are equal at creation. Repeated successful requests can create duplicate records; retry deduplication is not included. Creating an artifact does not automatically invoke ideation.
 
@@ -151,13 +155,15 @@ The create-only MVP postpones these editing and propagation semantics.
 
 ## 8. Implementation status and open choices
 
-The repository has a `src/catalyst_mcp/` package with a placeholder entry point. `pyproject.toml` declares Python 3.12 or later and uses the `uv_build` backend. MCP handlers, resource readers, persistence, generation and automated tests are not implemented.
+The repository has a `src/catalyst_mcp/` package with a placeholder entry point and strict Pydantic 2 models for analysis input, generated business content and the complete Business Artifact. Contract tests cover these models. `pyproject.toml` declares Python 3.12 or later and uses the `uv_build` backend; uv manages dependencies and pytest runs the tests.
+
+Catalog schemas, MCP handlers, resource readers, persistence and generation are not implemented. Business Artifact metadata assignment and configurable input-size enforcement also remain unimplemented; the current schemas only validate supplied values.
 
 Open choices include:
 
 - LLM provider, model and runtime configuration.
 - Target MCP host and connection settings.
-- MCP, validation and model-client dependency versions.
+- MCP and model-client dependency versions. Pydantic 2 is selected for validation; the exact installed version is recorded in `uv.lock`.
 - Final contract details identified in the implementation proposal.
 - Input size, timeout and generation limits.
 

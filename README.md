@@ -3,9 +3,10 @@
 Catalyst is being built to turn business text into a saved Business Artifact,
 then generate a saved Use-case Catalog linked to that artifact through MCP.
 
-The repository currently contains a Python package with a placeholder command
-and a development setup. MCP tools, resource readers, persistence, model
-integration, and application tests are not implemented yet.
+The repository currently contains a Python package with a placeholder command,
+a development setup, and validated Business Artifact models with contract tests.
+Catalog models, MCP tools, resource readers, persistence, and model integration
+are not implemented yet.
 
 ## Development setup
 
@@ -51,9 +52,34 @@ server yet.
 uv run --locked pytest
 ```
 
-There are no application tests yet. Until the first tests are added, pytest
-reports that no tests were collected and exits with code 5; this is not a passing
-test suite. Tests will be added alongside each authorized implementation step.
+The current tests cover analysis input, generated business content and the
+complete Business Artifact shape. They check strict types, all 12 required
+sections, content presence, metadata consistency and JSON round trips. These are
+local validation tests; they do not call a fake or live model provider or connect
+to an MCP host.
+
+## Business Artifact models
+
+`src/catalyst_mcp/models.py` separates analysis input, generated content and the
+complete record. A small input-validation example:
+
+```python
+from catalyst_mcp.models import AnalyzeBusinessModelInput
+
+request = AnalyzeBusinessModelInput(
+    businessContent="Northstar Bikes repairs bicycles for cyclists."
+)
+print(request.model_dump())
+```
+
+Output:
+
+```text
+{'businessContent': 'Northstar Bikes repairs bicycles for cyclists.'}
+```
+
+The class validates the supplied text. Generation and saving belong to later
+steps. Blank text and undocumented fields raise a Pydantic `ValidationError`.
 
 ## Build the package
 
