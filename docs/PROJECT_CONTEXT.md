@@ -1,6 +1,6 @@
 # Catalyst product scope and requirements
 
-Status: MVP requirements with a proposed implementation. Business Artifact schemas and their contract tests are implemented; the tool workflows are not implemented.
+Status: MVP requirements with a proposed implementation. Business Artifact and Use-case Catalog schemas and their contract tests are implemented; the tool workflows are not implemented.
 
 ## 1. Product purpose
 
@@ -90,7 +90,11 @@ Step 2 adopts `businessContent` as the analysis input name and arrays of non-bla
 
 Generated Business Artifact content contains only `name` and `businessModel`. The complete artifact requires backend-supplied metadata: `uri` must equal `catalyst://business-artifact/{id}`, and both timestamps must be timezone-aware UTC values and equal under the create-only contract. Schema validation does not assign metadata or save a record. See the [recorded schema decisions](SYSTEM_DESIGN.md#recorded-business-artifact-schema-decisions-step-2) for the Python and JSON representations.
 
-The focus input's optionality, alignment entry structure and operational limits remain proposed contract details. The configurable business-content size limit will be implemented with the analysis workflow, rather than fixed in these schemas.
+Step 3 adopts required `artifactId` and a strictly positive integer `numberOfIdeas`. Input `focus` may be omitted or `null`; provided text must be non-blank. Every use case requires its documented fields, with `targetUsers` as an array of non-blank strings (an empty array is allowed) and at least one alignment entry. Alignment entries contain an exact section name, non-blank `element` and non-blank `rationale`.
+
+Generated ideation content contains only `useCases`, with no case IDs or catalog metadata. The complete Catalog requires backend-supplied IDs, equal UTC timestamps, `sourceArtifact.id` and at least one case. Case IDs must be unique within a catalog. The Catalog has no `uri` field. See the [recorded Catalog schema decisions](SYSTEM_DESIGN.md#recorded-ideation-and-catalog-schema-decisions-step-3).
+
+The configurable upper idea-count limit (initially proposed as 10), exact requested-count checks, source existence and exact source-element matches belong to the later ideation workflow and are not enforced by these standalone schemas. Input-size and timeout limits also remain operational choices; the configurable business-content size limit will be implemented with the analysis workflow.
 
 Under the create-only proposal, `createdAt` and `updatedAt` are equal at creation. Repeated successful requests can create duplicate records; retry deduplication is not included. Creating an artifact does not automatically invoke ideation.
 
@@ -155,9 +159,9 @@ The create-only MVP postpones these editing and propagation semantics.
 
 ## 8. Implementation status and open choices
 
-The repository has a `src/catalyst_mcp/` package with a placeholder entry point and strict Pydantic 2 models for analysis input, generated business content and the complete Business Artifact. Contract tests cover these models. `pyproject.toml` declares Python 3.12 or later and uses the `uv_build` backend; uv manages dependencies and pytest runs the tests.
+The repository has a `src/catalyst_mcp/` package with a placeholder entry point and strict Pydantic 2 models for analysis and ideation inputs, generated content, alignment entries, and complete Business Artifact and Catalog payloads. Contract tests cover these models. `pyproject.toml` declares Python 3.12 or later and uses the `uv_build` backend; uv manages dependencies and pytest runs the tests.
 
-Catalog schemas, MCP handlers, resource readers, persistence and generation are not implemented. Business Artifact metadata assignment and configurable input-size enforcement also remain unimplemented; the current schemas only validate supplied values.
+MCP handlers, resource readers, persistence and generation are not implemented. Metadata assignment, source-existence and exact source-element checks, exact requested-count checks, and configurable input-size and idea-count limits also remain unimplemented; the current schemas only validate supplied values and local record consistency.
 
 Open choices include:
 

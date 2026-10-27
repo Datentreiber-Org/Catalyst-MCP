@@ -4,9 +4,9 @@ Catalyst is being built to turn business text into a saved Business Artifact,
 then generate a saved Use-case Catalog linked to that artifact through MCP.
 
 The repository currently contains a Python package with a placeholder command,
-a development setup, and validated Business Artifact models with contract tests.
-Catalog models, MCP tools, resource readers, persistence, and model integration
-are not implemented yet.
+a development setup, and validated Business Artifact and Use-case Catalog models
+with contract tests. MCP tools, resource readers, persistence, and model
+integration are not implemented yet.
 
 ## Development setup
 
@@ -52,11 +52,16 @@ server yet.
 uv run --locked pytest
 ```
 
-The current tests cover analysis input, generated business content and the
-complete Business Artifact shape. They check strict types, all 12 required
-sections, content presence, metadata consistency and JSON round trips. These are
-local validation tests; they do not call a fake or live model provider or connect
-to an MCP host.
+The current tests cover analysis and ideation inputs, generated content and the
+complete Business Artifact and Catalog shapes. They check strict types, all 12
+business-model sections, alignment structure, content presence, metadata
+consistency, unique case IDs and JSON round trips. These are local validation
+tests; they do not call a fake or live model provider or connect to an MCP host.
+
+- `tests/test_business_artifact.py` covers analysis input and Business
+  Artifact validation.
+- `tests/test_use_case_catalog.py` covers ideation input,
+  alignment entries and Use-case Catalog validation.
 
 ## Business Artifact models
 
@@ -80,6 +85,36 @@ Output:
 
 The class validates the supplied text. Generation and saving belong to later
 steps. Blank text and undocumented fields raise a Pydantic `ValidationError`.
+
+## Ideation and Catalog models
+
+The same module defines ideation input, alignment entries, generated cases and
+the complete Catalog. For example:
+
+```python
+from catalyst_mcp.models import IdeateUseCaseInput
+
+request = IdeateUseCaseInput(artifactId="ba_demo", numberOfIdeas=2)
+print(request.model_dump())
+```
+
+Output:
+
+```text
+{'artifactId': 'ba_demo', 'numberOfIdeas': 2, 'focus': None}
+```
+
+Omitting input `focus` or supplying `null` means no focus was supplied. Provided
+focus text must be non-blank. Every use case still requires its own non-blank
+focus, the `targetUsers` array and at least one alignment entry.
+
+Generated cases have no IDs. A complete `UseCase` adds its backend-supplied ID;
+`UseCaseCatalog` adds the catalog ID, equal UTC timestamps and `sourceArtifact.id`.
+Case IDs must be unique within the catalog, and the Catalog has no `uri` field.
+
+These schemas require a positive idea count. A configurable maximum (initially
+proposed as 10), the exact requested result count, source existence and exact
+alignment-element matches remain checks for the later ideation workflow.
 
 ## Build the package
 

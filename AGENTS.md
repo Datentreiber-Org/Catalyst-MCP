@@ -52,19 +52,21 @@ The proposed implementation uses one Python backend, the official MCP SDK, Pydan
 
 ## Implementation status
 
-The repository currently contains a placeholder entry point, a uv development setup, and strict Business Artifact models with contract tests. Catalog models, MCP tools, resource readers, persistence, Markdown views, metadata assignment and model integration are not implemented. See the product document for open implementation choices.
+The repository currently contains a placeholder entry point, a uv development setup, and strict Business Artifact and Catalog models with contract tests. MCP tools, resource readers, persistence, Markdown views, metadata assignment and model integration are not implemented. Source-existence, exact source-element and requested-count checks remain part of the later workflows. See the product document for open implementation choices.
 
 ## Implementation checklist
 
-Steps 1 and 2 are authorized and complete. Later steps remain unimplemented and require explicit authorization. Add only the dependencies, configuration, documentation, and tests needed by each authorized step.
+Steps 1, 2 and 3 are authorized and complete. Later steps remain unimplemented and require explicit authorization. Add only the dependencies, configuration, documentation, and tests needed by each authorized step.
 
 Step 1 verification: Python 3.12.2, pytest 9.1.1, locked environment sync, package import, source-distribution and wheel builds, and placeholder command execution were verified. At that step, pytest collected zero tests and returned exit code 5 because no application tests existed yet.
 
 Step 2 verification: all 158 Business Artifact contract test cases passed with Python 3.12.2, pytest 9.1.1 and Pydantic 2.14.1. Locked environment sync, source-distribution and wheel builds, and concrete input/artifact validation examples succeeded. Tests cover strict input and section types, required fields, metadata consistency, exact JSON shapes and content-preserving JSON round trips. These are local schema tests; fake-provider, live-model and host-integration checks have not been performed. Configurable input-size enforcement remains part of the later analysis workflow.
 
+Step 3 verification: 124 new ideation and Catalog contract cases passed alongside the 158 existing cases, for 282 passing tests on the same Python, pytest and Pydantic versions. Source-distribution and wheel builds, ideation-input and complete Catalog examples, and JSON round trips succeeded. Checks cover optional input focus, positive strict counts, alignment structure, required content, metadata boundaries, unique case IDs and the absence of a Catalog URI field. These remain local schema checks; no provider or host integration was tested. The configurable upper count limit, exact requested count and matching references against a saved source artifact remain unimplemented.
+
 - [x] 1. Verify Python 3.12+, repair package metadata's missing README, and establish the test setup.
 - [x] 2. Define and test Business Artifact input, generated-content, and saved-object models.
-- [ ] 3. Define and test ideation input, generated-content, alignment, and Catalog models.
+- [x] 3. Define and test ideation input, generated-content, alignment, and Catalog models.
 - [ ] 4. Add atomic Business Artifact storage, retrieval, and listing in SQLite.
 - [ ] 5. Add Catalog storage, retrieval, and listing with enforced source associations.
 - [ ] 6. Render complete, deterministic Business Artifact Markdown.

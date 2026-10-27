@@ -1,6 +1,6 @@
 # Catalyst MVP system design
 
-Status: implementation design for the two-tool MVP. Business Artifact schemas and their contract tests are implemented. MCP integration, Catalog schemas, persistence, Markdown views and generation remain proposed work.
+Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas and their contract tests are implemented. MCP integration, persistence, Markdown views and generation remain proposed work.
 
 See [Product scope and requirements](PROJECT_CONTEXT.md) for the product contracts, scope and open choices. This document recommends implementation details, including create-only records, optional input focus, string-array entries, alignment objects and generation limits. These details remain proposals unless explicitly recorded as implementation decisions below.
 
@@ -148,9 +148,19 @@ The LLM generates the use-case content fields. The backend generates the catalog
 
 The tool loads the artifact from the repository. It does not rely on the host to recreate or resend its business model from conversation history. The requested focus constrains generation; each returned case has a specific focus label within that scope.
 
-### Proposed businessElementAlignment structure
+#### Recorded ideation and Catalog schema decisions (step 3)
 
-The output contract includes an alignment array. The proposed structure for each entry is:
+- Require a non-blank `artifactId` and a strictly positive integer `numberOfIdeas`. Reject booleans, numeric strings and floats as counts. The configurable maximum, initially proposed as 10, remains a later workflow check rather than a fixed schema bound.
+- Allow input `focus` to be omitted or `null`. If text is supplied, require non-whitespace content and preserve it unchanged. The focus field on each generated or complete use case remains required non-blank text.
+- Require all six use-case content fields. `targetUsers` is an array of non-blank strings and may be empty; `businessElementAlignment` is an array with at least one entry. Each alignment requires `section`, `element` and `rationale`; `section` is one of the exact 12 business-model keys, and the other fields are non-blank strings.
+- Represent generated ideation content as an object containing only a non-empty `useCases` array. Generated cases cannot supply IDs; generated catalogs cannot supply metadata or a source association.
+- A complete use case adds a required backend-supplied `id` to the content fields. A complete Catalog requires `id`, timezone-aware UTC `createdAt` and `updatedAt`, `sourceArtifact` containing only its `id`, and a non-empty `useCases` array. Require equal creation timestamps and unique case IDs within the catalog.
+- Forbid unknown fields at every object level, including a Catalog `uri` field. Preserve supplied content and array order. These models validate supplied metadata; they do not assign it or save records.
+- Source existence, exact alignment-element matches and the exact requested idea count require the request and saved source artifact. They remain part of the later ideation workflow. Shape validation alone does not establish source support, business relevance or compliance with a requested focus.
+
+### businessElementAlignment structure
+
+The output contract includes an alignment array. The adopted structure for each entry is:
 
 ```json
 {
@@ -300,7 +310,8 @@ src/
       ideate_use_case.md
 tests/
   fixtures/                Synthetic business briefs and generated records
-  test_models.py           Business Artifact schema and validation tests
+  test_business_artifact.py Business Artifact schema and validation tests
+  test_use_case_catalog.py  Ideation, alignment and Catalog validation tests
   test_analysis.py
   test_ideation.py
   test_repository.py
@@ -308,7 +319,7 @@ tests/
   test_mcp_flow.py
 ```
 
-The package entry point, Business Artifact models in `models.py`, and their tests in `test_models.py` currently exist. The other modules and test files above are proposed additions. Test examples currently live directly in `test_models.py`; no fixtures directory has been added.
+The package entry point, Business Artifact and Catalog models in `models.py`, and their tests in `test_business_artifact.py` and `test_use_case_catalog.py` currently exist. The other modules and test files above are proposed additions. Test examples currently live directly in those test modules; no fixtures directory has been added.
 
 The prompt files contain backend generation instructions. They are not separately registered MCP Prompts in this MVP.
 
