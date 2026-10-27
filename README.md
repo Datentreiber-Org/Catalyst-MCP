@@ -3,14 +3,12 @@
 Catalyst is being built to turn business text into a saved Business Artifact,
 then generate a saved Use-case Catalog linked to that artifact through MCP.
 
-The repository currently contains a Python package with a placeholder command,
-a development setup, and validated Business Artifact and Use-case Catalog models
-with contract tests. Business Artifacts and Catalogs can be saved, read and listed
-through a SQLite repository, with Catalog source associations enforced by a
-foreign key. Both record types have deterministic Markdown renderers. MCP tools,
-resource readers and live model integration are not implemented yet. An analysis
-service now validates scripted fake-provider output, assigns metadata and returns
-the complete committed Business Artifact.
+The repository contains validated Business Artifact and Use-case Catalog models,
+SQLite persistence and deterministic Markdown renderers. A local stdio MCP server
+exposes `analyze-business-model` using scripted fake-provider responses. It
+validates generated content, assigns metadata and returns the complete committed
+Business Artifact. Ideation, MCP resource readers and live model integration
+remain unimplemented.
 
 ## Development setup
 
@@ -33,20 +31,110 @@ uv run --locked python --version
 uv run --locked python -c "import catalyst_mcp; print(catalyst_mcp.__file__)"
 ```
 
-## Run the current placeholder
+## Run the stdio development server
 
 ```bash
-uv run --locked catalyst-mcp
+uv run --locked catalyst-mcp --database data/stdio-demo.sqlite3 --fake-response data/fake-analysis.json
 ```
 
-Expected output:
+The command now starts an MCP server and waits for a client on stdin. It does not
+print a greeting. Application logs and the explicit fake-provider startup notice
+go to stderr; stdout carries MCP messages. Use `--help` to see its arguments.
+
+Both paths are explicit. Create the synthetic response file using the example
+below. Each provider call consumes one `--fake-response` file in order, including
+correction attempts. Repeat the option to supply additional responses, for example
+`--fake-response first.json --fake-response corrected.json`. Exhausting the script
+returns a tool error. No LLM or provider credentials are used.
+
+The server currently advertises only `analyze-business-model`. Its input is
+`{"businessContent": "..."}` with a 20,000-character maximum and no extra fields.
+A successful call returns the complete saved artifact as `structuredContent` and
+matching JSON text, conforming to the advertised `outputSchema`. Failures have
+`isError: true` and no structured success payload. Resources and resource links
+remain later steps; the canonical URI is already present inside the artifact.
+
+The server uses the [official MCP Python SDK](https://py.sdk.modelcontextprotocol.io/),
+version 2.3.0 recorded in `uv.lock`, with its documented
+[low-level server API](https://py.sdk.modelcontextprotocol.io/advanced/low-level-server/).
+
+## Analysis over MCP
+
+Run this Python example from the repository root with the project's environment.
+It creates the synthetic file used above and launches the actual console command
+through the SDK client. It uses a separate demo database from the storage examples.
+
+```python
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+from mcp import Client
+from mcp.client.stdio import StdioServerParameters
+
+from catalyst_mcp.models import BusinessModel
+from catalyst_mcp.repository import SQLiteRepository
+
+data_directory = Path("data").resolve()
+data_directory.mkdir(exist_ok=True)
+response_path = data_directory / "fake-analysis.json"
+database_path = data_directory / "stdio-demo.sqlite3"
+sections = {section: [] for section in BusinessModel.model_fields}
+sections["endUsers"] = ["Cyclists"]
+sections["activities"] = ["Repair bicycles"]
+response_path.write_text(json.dumps({
+    "name": "Northstar Bikes", "businessModel": sections,
+}), encoding="utf-8")
+
+
+async def demonstrate_analysis():
+    """Discover the analysis tool, call it over stdio and verify its saved result."""
+    parameters = StdioServerParameters(
+        command=str(Path(sys.executable).with_name("catalyst-mcp")),
+        args=["--database", str(database_path), "--fake-response", str(response_path)],
+    )
+    async with Client(parameters, read_timeout_seconds=10) as client:
+        tools = await client.list_tools()
+        print(tools.tools[0].name)
+        result = await client.call_tool("analyze-business-model", {
+            "businessContent": "Northstar Bikes repairs bicycles for cyclists.",
+        })
+        assert not result.is_error
+        artifact = result.structured_content
+        print(artifact["name"])
+        print(artifact["businessModel"]["activities"])
+        assert json.loads(result.content[0].text) == artifact
+    saved = SQLiteRepository(database_path).get_business_artifact(artifact["id"])
+    print(saved.model_dump(mode="json") == artifact)
+
+
+asyncio.run(demonstrate_analysis())
+```
+
+Output on stdout:
 
 ```text
-Hello from catalyst-mcp!
+analyze-business-model
+Northstar Bikes
+['Repair bicycles']
+True
 ```
 
-The command currently prints this greeting and exits. It does not start an MCP
-server yet.
+The client completes protocol setup, discovers the tool and sends the business
+text. The fake returns the supplied JSON; it performs no extraction. The final
+`True` confirms that the complete MCP result matches the saved record after the
+server exits. This is a local SDK-client check, separate from integration with a
+selected AI host or a live model.
+
+In `server.py`, `create_server` keeps the injected provider and repository in two
+small callbacks. `list_tools` advertises the exact schemas from our existing models.
+`call_tool` validates arguments, runs analysis in a worker thread and wraps the
+committed artifact in the MCP result. `_tool_error` logs a fixed failure summary
+and returns an error without echoing business text or provider exception details.
+`run_stdio` connects the SDK's stdin/stdout streams to its server runner. The
+updated package `main` loads the explicit file paths, configures stderr logging
+and starts that runner. Imports do not start a server or create a database.
 
 ## Tests
 
@@ -64,7 +152,9 @@ round trips, process restart persistence and failure rollback. Markdown tests fo
 both record types parse the output as CommonMark and verify content preservation,
 escaping, completeness and determinism. Analysis workflow tests use a scripted
 fake provider to check input limits, bounded correction, metadata and failure
-atomicity. No live model provider or MCP host is exercised.
+atomicity. MCP tests use the official client in process and real console-command
+subprocesses, checking discovery, complete results, failures, restart persistence
+and JSON-RPC stdout. No live model provider or selected AI host is exercised.
 
 - `tests/test_artifact_model.py` covers analysis input and Business
   Artifact validation.
@@ -80,6 +170,8 @@ atomicity. No live model provider or MCP host is exercised.
   all case fields and alignments, literal text and unchanged saved records.
 - `tests/test_artifact_service.py` covers analysis with scripted responses,
   correction limits, provider failures and a real SQLite commit failure.
+- `tests/test_artifact_mcp.py` covers analysis discovery and schemas, strict
+  arguments, safe failure results, CLI startup and real stdio exchanges.
 
 `markdown-it-py` is a development dependency used to parse Markdown in tests.
 The production renderer uses Python's standard library and the existing models.
@@ -376,7 +468,8 @@ insufficient-content `ValueError` without retrying. Provider and database failur
 propagate without a success result or a partially saved artifact.
 
 This verifies workflow behavior with a fake. Real analysis prompts, model quality,
-provider deadline enforcement, ideation and MCP integration remain later work.
+provider deadline enforcement, ideation, resource readers and selected-host
+integration remain later work.
 
 ## Build the package
 
