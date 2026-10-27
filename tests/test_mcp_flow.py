@@ -10,6 +10,7 @@ import pytest
 from mcp import Client, MCPError
 from mcp.client.stdio import StdioServerParameters
 
+from catalyst_mcp.markdown_views import render_business_artifact, render_use_case_catalog
 from catalyst_mcp.models import BusinessArtifact, BusinessModel, UseCaseCatalog
 from catalyst_mcp.repository import SQLiteRepository
 
@@ -79,6 +80,7 @@ async def _stdio_flow(database_path, analysis_paths, ideation_paths, artifact_id
         await process.stdin.drain()
         tools = await request("tools/list")
         artifact = None
+        tool_results = []
         if artifact_id is None:
             analysis_result = await request("tools/call", {
                 "name": "analyze-business-model",
@@ -86,28 +88,49 @@ async def _stdio_flow(database_path, analysis_paths, ideation_paths, artifact_id
             })
             assert analysis_result["isError"] is False
             artifact = analysis_result["structuredContent"]
+            tool_results.append(analysis_result)
             assert json.loads(analysis_result["content"][0]["text"]) == artifact
             artifact_id = artifact["id"]
         catalog_result = await request("tools/call", {
             "name": "ideate-use-case",
             "arguments": {"artifactId": artifact_id, "numberOfIdeas": 1, "focus": "Workshop efficiency"},
         })
+        tool_results.append(catalog_result)
         resources = await request("resources/list")
+        listed = {resource["uri"]: resource for resource in resources["resources"]}
+        for result in tool_results:
+            if result["isError"]:
+                assert [item["type"] for item in result["content"]] == ["text"]
+                continue
+            assert [item["type"] for item in result["content"]] == ["text", "resource_link", "resource_link"]
+            payload = result["structuredContent"]
+            canonical = payload.get("uri") or f"catalyst://use-case-catalog/{payload['id']}"
+            assert [item["uri"] for item in result["content"][1:]] == [canonical, f"{canonical}/view.md"]
+            for link in result["content"][1:]:
+                assert link["name"] == listed[link["uri"]]["name"]
+                assert link["mimeType"] == listed[link["uri"]]["mimeType"]
         saved = SQLiteRepository(database_path)
         for resource in resources["resources"]:
-            assert resource["mimeType"] == "application/json"
             result = await request("resources/read", {"uri": resource["uri"]})
             assert len(result["contents"]) == 1
             content = result["contents"][0]
             assert content["uri"] == resource["uri"]
-            assert content["mimeType"] == "application/json"
-            data = json.loads(content["text"])
-            if resource["uri"].startswith("catalyst://business-artifact/"):
-                expected = saved.get_business_artifact(data["id"])
+            assert content["mimeType"] == resource["mimeType"]
+            canonical = resource["uri"]
+            markdown = content["mimeType"] == "text/markdown"
+            if markdown:
+                assert canonical.endswith("/view.md")
+                canonical = canonical[:-len("/view.md")]
             else:
-                assert resource["uri"] == f"catalyst://use-case-catalog/{data['id']}"
-                expected = saved.get_use_case_catalog(data["id"])
-            assert data == expected.model_dump(mode="json")
+                assert content["mimeType"] == "application/json"
+            if canonical.startswith("catalyst://business-artifact/"):
+                record = saved.get_business_artifact(canonical.removeprefix("catalyst://business-artifact/"))
+                expected = render_business_artifact(record) if markdown else record.model_dump_json()
+            else:
+                assert canonical.startswith("catalyst://use-case-catalog/")
+                record = saved.get_use_case_catalog(canonical.removeprefix("catalyst://use-case-catalog/"))
+                expected = render_use_case_catalog(record) if markdown else record.model_dump_json()
+            assert content["text"] == expected
     finally:
         process.stdin.close()
         try:
@@ -133,7 +156,7 @@ def test_two_tool_flow_and_ideation_after_restart(tmp_path, response_files):
     ))
     assert [tool["name"] for tool in tools["tools"]] == ["analyze-business-model", "ideate-use-case"]
     assert result["isError"] is False
-    assert len(result["content"]) == 1 and result["content"][0]["type"] == "text"
+    assert len(result["content"]) == 3 and result["content"][0]["type"] == "text"
     catalog = UseCaseCatalog.model_validate_json(result["content"][0]["text"])
     artifact = BusinessArtifact.model_validate_json(json.dumps(artifact_data))
     assert result["structuredContent"] == catalog.model_dump(mode="json")
@@ -144,7 +167,7 @@ def test_two_tool_flow_and_ideation_after_restart(tmp_path, response_files):
     repository = SQLiteRepository(database_path)
     assert repository.get_business_artifact(artifact.id) == artifact
     assert repository.get_use_case_catalog(catalog.id) == catalog
-    assert len(wire) == 7
+    assert len(wire) == 9
     assert "analyze-business-model saved artifact_id=" in stderr
     assert "ideate-use-case saved catalog_id=" in stderr
     assert "Northstar Bikes" not in stderr
@@ -157,7 +180,7 @@ def test_two_tool_flow_and_ideation_after_restart(tmp_path, response_files):
     assert restarted_result["structuredContent"]["sourceArtifact"] == {"id": artifact.id}
     assert restarted_result["structuredContent"]["id"] != catalog.id
     assert "0 analysis and 1 ideation scripted fake responses" in restarted_stderr
-    assert len(restarted_wire) == 7
+    assert len(restarted_wire) == 10
     reopened = SQLiteRepository(database_path)
     assert reopened.list_business_artifacts() == [artifact]
     assert reopened.get_use_case_catalog(catalog.id) == catalog
@@ -178,7 +201,7 @@ def test_two_script_corrections_are_independent(tmp_path, response_files):
     assert "private-provider-output-marker" not in stderr
     repository = SQLiteRepository(database_path)
     assert len(repository.list_business_artifacts()) == len(repository.list_use_case_catalogs()) == 1
-    assert len(wire) == 7
+    assert len(wire) == 9
 
 
 def test_failed_ideation_keeps_saved_artifact_and_no_catalog(tmp_path, response_files):
@@ -205,11 +228,11 @@ def test_failed_ideation_keeps_saved_artifact_and_no_catalog(tmp_path, response_
     repository = SQLiteRepository(database_path)
     assert repository.list_business_artifacts() == [artifact]
     assert repository.list_use_case_catalogs() == []
-    assert len(wire) == 6
+    assert len(wire) == 7
 
 
-def test_json_resources_after_restart_without_provider_scripts(tmp_path, response_files):
-    """Read both tool-created records through a new stdio server with empty providers."""
+def test_both_resource_formats_after_restart_without_provider_scripts(tmp_path, response_files):
+    """Read both formats of both tool-created records with no configured generation scripts."""
     analysis_path, ideation_path = response_files
     database_path = tmp_path / "catalyst.sqlite3"
     _, artifact, result, _, _ = asyncio.run(_stdio_flow(
@@ -218,7 +241,7 @@ def test_json_resources_after_restart_without_provider_scripts(tmp_path, respons
     catalog = result["structuredContent"]
 
     async def read_after_restart():
-        """Use the official SDK client for JSON discovery and reads after restart."""
+        """Use the official SDK client for both views after a process restart."""
         parameters = StdioServerParameters(
             command=str(Path(sys.executable).with_name("catalyst-mcp")),
             args=["--database", str(database_path)],
@@ -230,21 +253,32 @@ def test_json_resources_after_restart_without_provider_scripts(tmp_path, respons
             for resource in listing.resources:
                 content = (await client.read_resource(resource.uri)).contents[0]
                 assert content.uri == resource.uri
-                assert content.mime_type == resource.mime_type == "application/json"
-                values[resource.uri] = json.loads(content.text)
+                assert content.mime_type == resource.mime_type
+                if content.mime_type == "application/json":
+                    values[resource.uri] = json.loads(content.text)
+                else:
+                    assert content.mime_type == "text/markdown"
+                    values[resource.uri] = content.text
             with pytest.raises(MCPError) as missing:
                 await client.read_resource("catalyst://business-artifact/ba_missing")
             assert missing.value.code == -32602
             assert missing.value.message == "Resource not found."
+            with pytest.raises(MCPError) as missing_markdown:
+                await client.read_resource("catalyst://use-case-catalog/uc_missing/view.md")
+            assert missing_markdown.value.code == -32602
             with pytest.raises(MCPError) as cursor:
                 await client.list_resources(cursor="invalid-cursor", cache_mode="bypass")
             assert cursor.value.code == -32602
             return values
 
     values = asyncio.run(read_after_restart())
+    saved_artifact = BusinessArtifact.model_validate_json(json.dumps(artifact))
+    saved_catalog = UseCaseCatalog.model_validate_json(json.dumps(catalog))
     assert values == {
         artifact["uri"]: artifact,
+        f"{artifact['uri']}/view.md": render_business_artifact(saved_artifact),
         f"catalyst://use-case-catalog/{catalog['id']}": catalog,
+        f"catalyst://use-case-catalog/{catalog['id']}/view.md": render_use_case_catalog(saved_catalog),
     }
     repository = SQLiteRepository(database_path)
     assert repository.get_business_artifact(artifact["id"]).model_dump(mode="json") == artifact

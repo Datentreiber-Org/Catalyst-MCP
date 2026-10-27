@@ -1,4 +1,4 @@
-"""Stdio MCP tools and canonical JSON resources for saved records."""
+"""Stdio MCP tools and JSON/Markdown resources for complete saved records."""
 
 import asyncio
 import logging
@@ -19,6 +19,7 @@ from mcp.types import (
     ReadResourceRequestParams,
     ReadResourceResult,
     Resource,
+    ResourceLink,
     TextContent,
     TextResourceContents,
     Tool,
@@ -26,6 +27,7 @@ from mcp.types import (
 from pydantic import ValidationError
 
 from catalyst_mcp.llm_client import AnalysisProvider, IdeationProvider
+from catalyst_mcp.markdown_views import render_business_artifact, render_use_case_catalog
 from catalyst_mcp.models import (
     AnalyzeBusinessModelInput,
     BusinessArtifact,
@@ -45,6 +47,7 @@ from catalyst_mcp.services import (
 logger = logging.getLogger(__name__)
 _ARTIFACT_JSON_PREFIX = "catalyst://business-artifact/"
 _CATALOG_JSON_PREFIX = "catalyst://use-case-catalog/"
+_MARKDOWN_SUFFIX = "/view.md"
 
 
 def _tool_error(tool_name: str, message: str) -> CallToolResult:
@@ -61,36 +64,80 @@ def _resource_error(operation: str, code: int, message: str) -> MCPError:
     return MCPError(code=code, message=message)
 
 
-def _list_json_resources(repository: SQLiteRepository) -> list[Resource]:
-    """Describe all saved records as JSON, in record-type then ID order."""
-    resources = [
+def _resource_views(record: BusinessArtifact | UseCaseCatalog) -> list[Resource]:
+    """Describe the JSON and Markdown views without rendering or storing either."""
+    if isinstance(record, BusinessArtifact):
+        uri = record.uri
+        name = f"{record.name} [{record.id}]"
+    else:
+        uri = f"{_CATALOG_JSON_PREFIX}{record.id}"
+        name = f"Use-case Catalog {record.id}"
+    return [
         Resource(
-            uri=artifact.uri,
-            name=f"{artifact.name} ({artifact.id}, JSON)",
+            uri=uri,
+            name=f"{name} (JSON)",
             mime_type="application/json",
-        )
-        for artifact in repository.list_business_artifacts()
+        ),
+        Resource(
+            uri=f"{uri}{_MARKDOWN_SUFFIX}",
+            name=f"{name} (Markdown)",
+            mime_type="text/markdown",
+        ),
     ]
-    resources.extend(
-        Resource(
-            uri=f"{_CATALOG_JSON_PREFIX}{catalog.id}",
-            name=f"Use-case Catalog {catalog.id} (JSON)",
-            mime_type="application/json",
-        )
-        for catalog in repository.list_use_case_catalogs()
+
+
+def _saved_tool_result(record: BusinessArtifact | UseCaseCatalog) -> CallToolResult:
+    """Wrap a committed record with complete JSON and links to both resource views."""
+    links = [
+        ResourceLink(type="resource_link", **view.model_dump())
+        for view in _resource_views(record)
+    ]
+    return CallToolResult(
+        content=[TextContent(type="text", text=record.model_dump_json()), *links],
+        structured_content=record.model_dump(mode="json"),
     )
+
+
+def _list_saved_resources(repository: SQLiteRepository) -> list[Resource]:
+    """List JSON/Markdown pairs in record-type then ID order, rejecting URI collisions."""
+    records = [*repository.list_business_artifacts(), *repository.list_use_case_catalogs()]
+    resources = [view for record in records for view in _resource_views(record)]
+    if len({resource.uri for resource in resources}) != len(resources):
+        raise ValueError("Saved record resource URIs collide")
     return resources
 
 
-def _read_json_resource(repository: SQLiteRepository, uri: str) -> str | None:
-    """Read one literal canonical URI and serialize its complete saved object."""
+def _load_saved_record(
+    repository: SQLiteRepository, uri: str
+) -> BusinessArtifact | UseCaseCatalog | None:
+    """Resolve one literal canonical URI without decoding or changing the identifier."""
     if uri.startswith(_ARTIFACT_JSON_PREFIX):
-        record = repository.get_business_artifact(uri[len(_ARTIFACT_JSON_PREFIX):])
-    elif uri.startswith(_CATALOG_JSON_PREFIX):
-        record = repository.get_use_case_catalog(uri[len(_CATALOG_JSON_PREFIX):])
-    else:
+        return repository.get_business_artifact(uri[len(_ARTIFACT_JSON_PREFIX):])
+    if uri.startswith(_CATALOG_JSON_PREFIX):
+        return repository.get_use_case_catalog(uri[len(_CATALOG_JSON_PREFIX):])
+    return None
+
+
+def _read_saved_resource(
+    repository: SQLiteRepository, uri: str
+) -> TextResourceContents | None:
+    """Preserve canonical JSON reads, otherwise render an exact Markdown-view URI."""
+    record = _load_saved_record(repository, uri)
+    if record is not None:
+        return TextResourceContents(
+            uri=uri, mime_type="application/json", text=record.model_dump_json()
+        )
+    if not uri.endswith(_MARKDOWN_SUFFIX):
         return None
-    return record.model_dump_json() if record is not None else None
+    record = _load_saved_record(repository, uri[:-len(_MARKDOWN_SUFFIX)])
+    if record is None:
+        return None
+    markdown = (
+        render_business_artifact(record)
+        if isinstance(record, BusinessArtifact)
+        else render_use_case_catalog(record)
+    )
+    return TextResourceContents(uri=uri, mime_type="text/markdown", text=markdown)
 
 
 def create_server(
@@ -164,10 +211,7 @@ def create_server(
             return _tool_error("analyze-business-model", "Analysis failed. No Business Artifact was saved.")
 
         logger.info("analyze-business-model saved artifact_id=%s", artifact.id)
-        return CallToolResult(
-            content=[TextContent(type="text", text=artifact.model_dump_json())],
-            structured_content=artifact.model_dump(mode="json"),
-        )
+        return _saved_tool_result(artifact)
 
     async def ideate(arguments: dict[str, object] | None) -> CallToolResult:
         """Validate ideation arguments and return the complete committed Catalog."""
@@ -209,10 +253,7 @@ def create_server(
             return _tool_error("ideate-use-case", "Ideation failed. No Use-case Catalog was saved.")
 
         logger.info("ideate-use-case saved catalog_id=%s", catalog.id)
-        return CallToolResult(
-            content=[TextContent(type="text", text=catalog.model_dump_json())],
-            structured_content=catalog.model_dump(mode="json"),
-        )
+        return _saved_tool_result(catalog)
 
     async def call_tool(
         ctx: ServerRequestContext, params: CallToolRequestParams
@@ -227,11 +268,11 @@ def create_server(
     async def list_resources(
         ctx: ServerRequestContext, params: PaginatedRequestParams | None
     ) -> ListResourcesResult:
-        """Advertise the current saved JSON records as one complete page."""
+        """Advertise both views of every saved record as one complete page."""
         if params is not None and params.cursor is not None:
             raise _resource_error("resources/list", INVALID_PARAMS, "Resource listing does not accept a cursor.")
         try:
-            resources = await asyncio.to_thread(_list_json_resources, repository)
+            resources = await asyncio.to_thread(_list_saved_resources, repository)
         except Exception:
             raise _resource_error("resources/list", INTERNAL_ERROR, "Could not list saved resources.") from None
         return ListResourcesResult(resources=resources)
@@ -239,16 +280,14 @@ def create_server(
     async def read_resource(
         ctx: ServerRequestContext, params: ReadResourceRequestParams
     ) -> ReadResourceResult:
-        """Return complete JSON or a fixed protocol error without writing data."""
+        """Return complete JSON/Markdown or a fixed protocol error without writing data."""
         try:
-            payload = await asyncio.to_thread(_read_json_resource, repository, params.uri)
+            content = await asyncio.to_thread(_read_saved_resource, repository, params.uri)
         except Exception:
             raise _resource_error("resources/read", INTERNAL_ERROR, "Could not read saved resource.") from None
-        if payload is None:
+        if content is None:
             raise _resource_error("resources/read", INVALID_PARAMS, "Resource not found.")
-        return ReadResourceResult(contents=[
-            TextResourceContents(uri=params.uri, mime_type="application/json", text=payload)
-        ])
+        return ReadResourceResult(contents=[content])
 
     return Server(
         "Catalyst",

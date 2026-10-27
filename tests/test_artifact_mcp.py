@@ -145,7 +145,7 @@ def test_call_returns_complete_saved_object(repository, response_json):
     ))
     result = results[0]
     assert result.is_error is False
-    assert len(result.content) == 1
+    assert len(result.content) == 3
     assert result.content[0].type == "text"
     assert json.loads(result.content[0].text) == result.structured_content
     artifact = BusinessArtifact.model_validate_json(result.content[0].text)
@@ -153,6 +153,11 @@ def test_call_returns_complete_saved_object(repository, response_json):
     assert set(result.structured_content) == {
         "id", "name", "uri", "createdAt", "updatedAt", "businessModel"
     }
+    links = result.content[1:]
+    assert [link.type for link in links] == ["resource_link", "resource_link"]
+    assert [link.uri for link in links] == [artifact.uri, f"{artifact.uri}/view.md"]
+    assert [link.mime_type for link in links] == ["application/json", "text/markdown"]
+    assert "JSON" in links[0].name and "Markdown" in links[1].name
     assert repository.list_business_artifacts() == [artifact]
     assert repository.list_use_case_catalogs() == []
     assert provider.calls == [(BUSINESS_CONTENT, None)]
@@ -174,6 +179,7 @@ def test_invalid_arguments_do_not_consume_script(repository, response_json, argu
     error, success = results
     assert error.is_error is True
     assert error.structured_content is None
+    assert [item.type for item in error.content] == ["text"]
     assert "private-marker" not in error.content[0].text
     assert success.is_error is False
     assert provider.calls == [(BUSINESS_CONTENT, None)]

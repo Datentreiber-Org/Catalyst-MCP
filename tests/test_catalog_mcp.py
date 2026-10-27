@@ -97,13 +97,19 @@ def test_complete_result_and_preserved_focus(repository, source, generated_paylo
     }]))
     result = results[0]
     assert result.is_error is False
-    assert len(result.content) == 1 and result.content[0].type == "text"
+    assert len(result.content) == 3 and result.content[0].type == "text"
     catalog = UseCaseCatalog.model_validate_json(result.content[0].text)
     assert result.structured_content == catalog.model_dump(mode="json")
     assert set(result.structured_content) == {
         "id", "createdAt", "updatedAt", "sourceArtifact", "useCases"
     }
     assert result.structured_content["sourceArtifact"] == {"id": source.id}
+    links = result.content[1:]
+    canonical_uri = f"catalyst://use-case-catalog/{catalog.id}"
+    assert [link.type for link in links] == ["resource_link", "resource_link"]
+    assert [link.uri for link in links] == [canonical_uri, f"{canonical_uri}/view.md"]
+    assert [link.mime_type for link in links] == ["application/json", "text/markdown"]
+    assert "JSON" in links[0].name and "Markdown" in links[1].name
     assert catalog.useCases[0].model_dump(exclude={"id"}) == generated_payload["useCases"][0]
     assert provider.calls == [(source.model_dump_json(), 1, focus, None)]
     assert repository.list_use_case_catalogs() == [catalog]
@@ -138,6 +144,7 @@ def test_invalid_input_does_not_consume_script(repository, source, generated_pay
     error, success = results
     assert error.is_error is True
     assert error.structured_content is None
+    assert [item.type for item in error.content] == ["text"]
     assert "private-input-marker" not in error.content[0].text + caplog.text
     assert success.is_error is False
     assert len(provider.calls) == 1

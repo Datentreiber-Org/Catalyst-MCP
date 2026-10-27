@@ -8,8 +8,8 @@ SQLite persistence and deterministic Markdown renderers. A local stdio MCP serve
 exposes `analyze-business-model` and `ideate-use-case` using scripted fake-provider
 responses. Both return complete committed records. Ideation validates the exact
 idea count and every source reference before saving its Catalog. Both saved types
-can be listed and read as canonical JSON resources. Markdown resource routes,
-resource links and live model integration remain unimplemented.
+can be listed and read as canonical JSON and on-demand Markdown resources. Tool
+results link to both views. Live model integration remains unimplemented.
 
 ## Development setup
 
@@ -60,11 +60,11 @@ The server advertises exactly two tools, both rejecting extra input fields:
 | `ideate-use-case` | Saved `artifactId`, integer `numberOfIdeas` from 1 to 10, optional non-blank `focus` or `null` |
 
 A successful call returns the complete saved artifact or Catalog as
-`structuredContent` and matching JSON text, conforming to its `outputSchema`. A
-Catalog has no `uri` field. Failures have
-`isError: true` and no structured success payload. Canonical JSON resources are
-available through `resources/list` and `resources/read`; Markdown routes and links
-in tool results remain later work. The artifact's canonical URI stays in its payload.
+`structuredContent` and matching JSON text, conforming to its `outputSchema`.
+The text is followed by two native MCP `resource_link` items, for JSON and Markdown.
+A Catalog has no `uri` field. Failures have `isError: true` and no structured success
+payload or resource links. Both resource views are available through
+`resources/list` and `resources/read`. The artifact's canonical URI stays in its payload.
 
 The server uses the [official MCP Python SDK](https://py.sdk.modelcontextprotocol.io/),
 version 2.3.0 recorded in `uv.lock`, with its documented
@@ -117,6 +117,10 @@ async def demonstrate_analysis():
         print(artifact["name"])
         print(artifact["businessModel"]["activities"])
         assert json.loads(result.content[0].text) == artifact
+        assert [item.type for item in result.content] == ["text", "resource_link", "resource_link"]
+        assert [link.uri for link in result.content[1:]] == [
+            artifact["uri"], f"{artifact['uri']}/view.md",
+        ]
     saved = SQLiteRepository(database_path).get_business_artifact(artifact["id"])
     print(saved.model_dump(mode="json") == artifact)
 
@@ -206,6 +210,11 @@ async def demonstrate_two_tool_flow():
         assert not ideation.is_error
         catalog = ideation.structured_content
         assert json.loads(ideation.content[0].text) == catalog
+        markdown_link = ideation.content[2]
+        assert markdown_link.type == "resource_link"
+        markdown = await client.read_resource(markdown_link.uri)
+        assert markdown.contents[0].mime_type == "text/markdown"
+        assert markdown.contents[0].text.startswith("# Use-case Catalog\n")
         print(catalog["useCases"][0]["title"])
         print(catalog["sourceArtifact"]["id"] == artifact["id"])
     repository = SQLiteRepository(database_path)
@@ -261,8 +270,9 @@ counts, source-element matches and failure atomicity. MCP tests use the official
 subprocesses, checking discovery, complete results, failures, restart persistence
 and JSON-RPC stdout. The full two-tool sequence and ideation after process restart
 are also exercised. No live model provider or selected AI host is exercised.
-JSON resource checks verify complete data, MIME types, exact URI matching,
-safe protocol errors, unchanged stored records and reads without provider calls.
+JSON/Markdown resource checks verify complete data, native tool links, MIME types,
+exact URI matching, deterministic rendering, literal special characters, safe
+protocol errors, unchanged stored records and reads without provider calls.
 
 - `tests/test_artifact_model.py` covers analysis input and Business
   Artifact validation.
@@ -285,9 +295,10 @@ safe protocol errors, unchanged stored records and reads without provider calls.
 - `tests/test_catalog_mcp.py` covers ideation discovery and schemas, strict
   arguments, saved-source handling, complete results, correction and failed commits.
 - `tests/test_mcp_flow.py` covers both tools through real stdio, independent scripts,
-  ideation after restart, rejected count/alignment output and JSON resources after restart.
-- `tests/test_mcp_resource.py` covers JSON discovery and reads, exact canonical
-  URIs, complete payloads, MIME types, safe errors and unchanged data/files.
+  ideation after restart, rejected count/alignment output, tool links and both
+  resource formats after restart.
+- `tests/test_mcp_resource.py` covers JSON/Markdown discovery and reads, exact
+  URIs, complete payloads, MIME types, determinism, safe errors and unchanged data/files.
 
 `markdown-it-py` is a development dependency used to parse Markdown in tests.
 The production renderer uses Python's standard library and the existing models.
@@ -477,7 +488,11 @@ async def demonstrate_json_resources():
     async with Client(parameters, read_timeout_seconds=10) as client:
         listing = await client.list_resources()
         assert listing.next_cursor is None
-        print([resource.mime_type for resource in listing.resources])
+        json_resources = [
+            resource for resource in listing.resources
+            if resource.mime_type == "application/json"
+        ]
+        print([resource.mime_type for resource in json_resources])
         artifact_result = await client.read_resource("catalyst://business-artifact/ba_demo")
         catalog_result = await client.read_resource("catalyst://use-case-catalog/uc_catalog_demo")
         artifact_content = artifact_result.contents[0]
@@ -512,26 +527,35 @@ saved JSON. The final `True` verifies both complete records, including metadata,
 all 12 business-model sections, every case and every alignment. The Catalog still
 has no `uri` field; its resource URI is constructed in the MCP layer.
 
-The resource code in `server.py` has five small functions:
+The resource and result helpers in `server.py` share the same descriptions:
 
-- `_list_json_resources` loads validated records and creates JSON resource
-  descriptions. Artifacts come first in ID order, followed by Catalogs in ID order.
-- `_read_json_resource` matches a literal canonical prefix, loads the exact saved
-  ID and serializes the full record. It does not decode URI escapes, normalize IDs
-  or perform filesystem lookups.
+- `_resource_views` creates two descriptions for a saved record: canonical JSON,
+  then `/view.md` Markdown, each with its name, URI and MIME type. It renders nothing.
+- `_saved_tool_result` returns the complete saved JSON in text and structured
+  content, followed by native resource links made from those two descriptions.
+- `_list_saved_resources` loads validated records and describes both views.
+  Artifacts come first in ID order, followed by Catalogs in ID order. Duplicate
+  advertised URIs cause a fixed listing error.
+- `_load_saved_record` matches a literal canonical prefix and loads the exact saved
+  ID. It does not decode URI escapes, normalize IDs or perform filesystem lookups.
+- `_read_saved_resource` first checks for an exact canonical JSON record. Otherwise,
+  a literal `/view.md` suffix selects the existing renderer for the base record.
+  It returns one content item with the requested URI and correct MIME type.
 - `_resource_error` logs a fixed operation summary and constructs an MCP protocol
   error without copying URI values, stored content or exception details into it.
 - `list_resources` runs discovery in a worker thread and returns a single page.
   An explicit cursor is rejected; pagination and change notifications are not enabled.
-- `read_resource` runs the read in a worker thread and returns the JSON content
-  or a protocol error. Missing/unsupported resources use `-32602`; database or
-  invalid-record failures use `-32603`, following the current
+- `read_resource` runs loading and rendering in a worker thread and returns the
+  content or a protocol error. Missing/unsupported resources use `-32602`; database,
+  invalid-record or rendering failures use `-32603`, following the current
   [resource error contract](https://modelcontextprotocol.io/specification/draft/server/resources#error-handling).
 
 Listing and reading make no provider calls, writes or new timestamps. JSON reads
-preserve stored text, field names and array order. `/view.md` resources and tool
-result links remain step 13; the existing Markdown renderers still work directly
-in Python as shown below. Live-model and selected-host checks remain separate.
+preserve stored text, field names and array order. Both Markdown renderers also
+work directly in Python as shown below. Backend-generated IDs avoid URI collisions.
+For manually stored IDs ending in `/view.md`, an exact canonical JSON record takes
+precedence; a collision between two advertised views causes listing to fail.
+Live-model and selected-host checks remain separate.
 
 ## Business Artifact Markdown
 
@@ -559,7 +583,7 @@ all 12 business-model sections. For example, its Activities section is:
 Empty sections contain `Not specified`. Text is escaped as literal content;
 multiline values remain within their original bullet. Rendering returns a string
 without calling a model, writing a Markdown file or changing the saved record.
-The MCP Markdown routes remain later steps.
+The MCP route returns this same string with MIME type `text/markdown`.
 
 ## Catalog Markdown
 
@@ -592,8 +616,79 @@ contain `Not specified`. The source URI is computed for display; no URI field is
 added to the Catalog or source reference.
 
 Like the artifact renderer, this returns text without model calls, database or
-file writes, source lookups or new timestamps. The MCP Markdown routes and host
-display remain later integration work.
+file writes, source lookups or new timestamps. The MCP route returns the same text;
+display in a selected AI host remains unverified.
+
+## Markdown resources over MCP
+
+After the storage examples, start another server with no provider scripts and read
+both saved Markdown views. This compares their complete contents with the existing
+renderers and repeats a read to check determinism:
+
+```python
+import asyncio
+import sys
+from pathlib import Path
+
+from mcp import Client
+from mcp.client.stdio import StdioServerParameters
+
+from catalyst_mcp.markdown_views import render_business_artifact, render_use_case_catalog
+from catalyst_mcp.repository import SQLiteRepository
+
+database_path = Path("data/catalyst.sqlite3").resolve()
+repository = SQLiteRepository(database_path)
+expected = {
+    "catalyst://business-artifact/ba_demo/view.md": render_business_artifact(
+        repository.get_business_artifact("ba_demo")
+    ),
+    "catalyst://use-case-catalog/uc_catalog_demo/view.md": render_use_case_catalog(
+        repository.get_use_case_catalog("uc_catalog_demo")
+    ),
+}
+
+
+async def demonstrate_markdown_resources():
+    """Discover both Markdown views and read the complete deterministic text."""
+    parameters = StdioServerParameters(
+        command=str(Path(sys.executable).with_name("catalyst-mcp")),
+        args=["--database", str(database_path)],
+    )
+    async with Client(parameters, read_timeout_seconds=10) as client:
+        listing = await client.list_resources()
+        markdown_resources = [
+            resource for resource in listing.resources
+            if resource.mime_type == "text/markdown"
+        ]
+        assert {resource.uri for resource in markdown_resources} == set(expected)
+        for resource in markdown_resources:
+            result = await client.read_resource(resource.uri)
+            content = result.contents[0]
+            assert content.uri == resource.uri
+            assert content.mime_type == "text/markdown"
+            assert content.text == expected[resource.uri]
+            repeated = await client.read_resource(resource.uri)
+            assert repeated.contents[0].text == content.text
+            print(content.mime_type, content.text.splitlines()[0])
+        print(True)
+
+
+asyncio.run(demonstrate_markdown_resources())
+```
+
+Output printed by the client:
+
+```text
+text/markdown # Business Artifact
+text/markdown # Use-case Catalog
+True
+```
+
+For example, reading `catalyst://business-artifact/ba_demo/view.md` returns the
+complete artifact document, including `## Activities` followed by `- Repair bicycles`.
+The canonical URI without `/view.md` continues to return saved JSON. Successful
+tool results link directly to both URIs with the same names and MIME types used
+by discovery. Clients can follow either link through `resources/read`.
 
 ## Analysis with a fake provider
 
@@ -668,8 +763,7 @@ insufficient-content `ValueError` without retrying. Provider and database failur
 propagate without a success result or a partially saved artifact.
 
 This verifies workflow behavior with a fake. Real analysis prompts, model quality,
-provider deadline enforcement, Markdown resource routes and
-selected-host integration remain later work.
+provider deadline enforcement and selected-host integration remain later work.
 
 ## Ideation with a fake provider
 
@@ -750,9 +844,9 @@ the feedback. Two invalid responses raise `RuntimeError`. Provider, source-read
 and database-save failures propagate without generation retries or partial Catalogs.
 
 These fake-provider checks establish orchestration and valid references. They do
-not assess idea relevance, rationale quality or semantic focus compliance. The
-Markdown resource routes/links, live prompts, provider deadlines and real model evaluation
-remain later work. Both tools are exposed through MCP with independent CLI scripts.
+not assess idea relevance, rationale quality or semantic focus compliance. Live
+prompts, provider deadlines and real model evaluation remain later work. Both tools
+are exposed through MCP with independent CLI scripts.
 
 ## Build the package
 

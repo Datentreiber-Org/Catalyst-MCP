@@ -1,4 +1,4 @@
-"""Canonical JSON resource discovery and reads with real SQLite persistence."""
+"""JSON/Markdown resource discovery and reads with real SQLite persistence."""
 
 import asyncio
 import json
@@ -8,8 +8,10 @@ from datetime import UTC, datetime
 
 import pytest
 from mcp import Client, MCPError
+from markdown_it import MarkdownIt
 
 from catalyst_mcp.llm_client import FakeAnalysisProvider, FakeIdeationProvider
+from catalyst_mcp.markdown_views import render_business_artifact, render_use_case_catalog
 from catalyst_mcp.models import BusinessArtifact, BusinessModel, UseCaseCatalog
 from catalyst_mcp.repository import SQLiteRepository
 from catalyst_mcp.server import create_server
@@ -119,7 +121,7 @@ def test_empty_listing_has_no_next_page(server, providers):
 
 
 def test_lists_all_saved_records_in_deterministic_order(server, repository, artifact, catalog, providers):
-    """List artifact IDs first, then Catalog IDs, independently of insertion order."""
+    """List JSON/Markdown pairs by artifact ID then Catalog ID, regardless of insertion."""
     other_artifact = artifact.model_copy(update={
         "id": "ba_z", "uri": "catalyst://business-artifact/ba_z"
     })
@@ -131,15 +133,20 @@ def test_lists_all_saved_records_in_deterministic_order(server, repository, arti
     first = asyncio.run(_listing(server))
     second = asyncio.run(_listing(server))
     assert first.resources == second.resources
-    assert [resource.uri for resource in first.resources] == [
+    canonical_uris = [
         artifact.uri, other_artifact.uri,
         f"catalyst://use-case-catalog/{catalog.id}",
         f"catalyst://use-case-catalog/{other_catalog.id}",
     ]
-    for resource, record in zip(first.resources, (artifact, other_artifact, catalog, other_catalog), strict=True):
-        assert resource.mime_type == "application/json"
-        assert record.id in resource.name and "JSON" in resource.name
-        assert "/view.md" not in resource.uri
+    assert [resource.uri for resource in first.resources] == [
+        uri for canonical in canonical_uris for uri in (canonical, f"{canonical}/view.md")
+    ]
+    for index, record in enumerate((artifact, other_artifact, catalog, other_catalog)):
+        json_view, markdown_view = first.resources[index * 2:index * 2 + 2]
+        assert json_view.mime_type == "application/json"
+        assert markdown_view.mime_type == "text/markdown"
+        assert record.id in json_view.name and "JSON" in json_view.name
+        assert record.id in markdown_view.name and "Markdown" in markdown_view.name
     assert artifact.name in first.resources[0].name
     assert first.next_cursor is None
     assert all(provider.calls == [] for provider in providers)
@@ -152,9 +159,9 @@ def test_listing_observes_new_saves_in_same_session(server, repository, artifact
         async with Client(server, raise_exceptions=True) as client:
             assert (await client.list_resources()).resources == []
             repository.save_business_artifact(artifact)
-            assert len((await client.list_resources()).resources) == 1
-            repository.save_use_case_catalog(catalog)
             assert len((await client.list_resources()).resources) == 2
+            repository.save_use_case_catalog(catalog)
+            assert len((await client.list_resources()).resources) == 4
     asyncio.run(check())
 
 
@@ -186,6 +193,9 @@ def test_exact_percent_literal_id_is_not_decoded(server, repository, artifact):
     result = asyncio.run(_read(server, selected.uri))
     assert result.contents[0].uri == selected.uri
     assert json.loads(result.contents[0].text)["id"] == "ba_literal%2Fid"
+    markdown = asyncio.run(_read(server, f"{selected.uri}/view.md")).contents[0]
+    assert markdown.mime_type == "text/markdown"
+    assert markdown.text == render_business_artifact(selected)
     with pytest.raises(MCPError) as error:
         asyncio.run(_read(server, "catalyst://business-artifact/ba_literal/id"))
     assert error.value.code == -32602
@@ -196,8 +206,11 @@ def test_exact_percent_literal_id_is_not_decoded(server, repository, artifact):
     "catalyst://business-artifact/ba_missing", "catalyst://use-case-catalog/uc_missing",
     "file:///private/private-uri-marker.json", "https://example.invalid/private-uri-marker",
     "catalyst://other/ba_demo", "CATALYST://business-artifact/ba_demo",
-    "catalyst://business-artifact/ba_demo/view.md",
-    "catalyst://use-case-catalog/uc_catalog_demo/view.md",
+    "catalyst://business-artifact/ba_missing/view.md",
+    "catalyst://use-case-catalog/uc_missing/view.md",
+    "catalyst://business-artifact/ba_demo/view.md/view.md",
+    "catalyst://business-artifact/ba_demo/view%2Emd",
+    "catalyst://use-case-catalog/uc_catalog_demo/view.md?format=markdown",
     "catalyst://business-artifact/ba_demo/", "catalyst://business-artifact/%62a_demo",
     "catalyst://business-artifact/ba_demo?format=json", "catalyst://business-artifact/ba_demo#fragment",
     "catalyst://business-artifact/../ba_demo", "catalyst://business-artifact/missing' OR 1=1 --",
@@ -228,7 +241,7 @@ def test_supplied_cursor_is_rejected(server, saved_records, cursor, caplog):
     ("artifact", "json"), ("artifact", "id"),
     ("catalog", "json"), ("catalog", "id"), ("catalog", "source"),
 ])
-@pytest.mark.parametrize("operation", ["read", "list"])
+@pytest.mark.parametrize("operation", ["read", "read_markdown", "list"])
 def test_corrupt_records_fail_without_repair(
     server, database_path, saved_records, kind, corruption, operation, providers, caplog
 ):
@@ -247,10 +260,12 @@ def test_corrupt_records_fail_without_repair(
     with closing(sqlite3.connect(database_path, autocommit=True)) as connection:
         connection.execute(f"UPDATE {table} SET payload_json = ?", (stored,))
     uri = artifact.uri if kind == "artifact" else f"catalyst://use-case-catalog/{catalog.id}"
+    if operation == "read_markdown":
+        uri += "/view.md"
     with pytest.raises(MCPError) as error:
-        asyncio.run(_read(server, uri) if operation == "read" else _listing(server))
+        asyncio.run(_read(server, uri) if operation.startswith("read") else _listing(server))
     assert error.value.code == -32603
-    expected_message = "Could not read saved resource." if operation == "read" else "Could not list saved resources."
+    expected_message = "Could not read saved resource." if operation.startswith("read") else "Could not list saved resources."
     assert error.value.message == expected_message
     assert "private-corrupt-marker" not in str(error.value) + caplog.text
     with closing(sqlite3.connect(database_path)) as connection:
@@ -259,7 +274,7 @@ def test_corrupt_records_fail_without_repair(
 
 
 @pytest.mark.parametrize("kind", ["artifact", "catalog"])
-@pytest.mark.parametrize("operation", ["read", "list"])
+@pytest.mark.parametrize("operation", ["read", "read_markdown", "list"])
 def test_real_database_failure_is_a_protocol_error(server, database_path, saved_records, kind, operation):
     """Handle a missing SQLite table without leaking SQL or database-path details."""
     artifact, catalog = saved_records
@@ -268,8 +283,10 @@ def test_real_database_failure_is_a_protocol_error(server, database_path, saved_
         connection.execute(f"DROP TABLE {table}")
     before = database_path.read_bytes()
     uri = artifact.uri if kind == "artifact" else f"catalyst://use-case-catalog/{catalog.id}"
+    if operation == "read_markdown":
+        uri += "/view.md"
     with pytest.raises(MCPError) as error:
-        asyncio.run(_read(server, uri) if operation == "read" else _listing(server))
+        asyncio.run(_read(server, uri) if operation.startswith("read") else _listing(server))
     assert error.value.code == -32603
     assert "SELECT" not in error.value.message
     assert str(database_path) not in error.value.message
@@ -298,3 +315,107 @@ def test_repeated_reads_leave_raw_data_and_files_unchanged(
     assert all(provider.calls == [] for provider in providers)
     assert json.loads(original_artifacts[0][1]) == artifact.model_dump(mode="json")
     assert json.loads(original_catalogs[0][2]) == catalog.model_dump(mode="json")
+
+
+@pytest.mark.parametrize("kind", ["artifact", "catalog"])
+def test_markdown_is_complete_literal_and_deterministic(server, saved_records, providers, kind):
+    """Serve the existing complete renderer output as Markdown without another model call."""
+    artifact, catalog = saved_records
+    record = artifact if kind == "artifact" else catalog
+    canonical = artifact.uri if kind == "artifact" else f"catalyst://use-case-catalog/{catalog.id}"
+    expected = render_business_artifact(artifact) if kind == "artifact" else render_use_case_catalog(catalog)
+    first = asyncio.run(_read(server, f"{canonical}/view.md")).contents[0]
+    second = asyncio.run(_read(server, f"{canonical}/view.md")).contents[0]
+    assert first.uri == f"{canonical}/view.md"
+    assert first.mime_type == "text/markdown"
+    assert first.text == second.text == expected
+    tokens = MarkdownIt("commonmark", {"html": True}).parse(first.text)
+    assert all(token.type != "html_block" for token in tokens)
+    children = [child for token in tokens for child in token.children or []]
+    assert all(child.type != "html_inline" for child in children)
+    recovered = "".join("\n" if child.type == "hardbreak" else child.content for child in children)
+    assert record.id in recovered
+    if kind == "artifact":
+        assert artifact.name in recovered
+        assert artifact.businessModel.activities[1] in recovered
+        assert first.text.count("\n## ") == 12
+    else:
+        assert catalog.useCases[0].title in recovered
+        assert catalog.useCases[0].proposedSolution in recovered
+        assert catalog.useCases[0].targetUsers[1] in recovered
+        assert "#### Alignment 2" in first.text
+    assert all(provider.calls == [] for provider in providers)
+
+
+@pytest.mark.parametrize("kind", ["artifact", "catalog"])
+def test_render_failure_preserves_json_and_data(
+    server, saved_records, database_path, providers, kind, monkeypatch, caplog
+):
+    """Report a safe read error while retaining JSON access and unchanged saved bytes."""
+    artifact, catalog = saved_records
+    record = artifact if kind == "artifact" else catalog
+    canonical = artifact.uri if kind == "artifact" else f"catalyst://use-case-catalog/{catalog.id}"
+    renderer = "render_business_artifact" if kind == "artifact" else "render_use_case_catalog"
+
+    def fail_render(record):
+        """Simulate a renderer exception containing content that must not be logged."""
+        raise RuntimeError("private-render-marker")
+
+    monkeypatch.setattr(f"catalyst_mcp.server.{renderer}", fail_render)
+    before = database_path.read_bytes()
+    assert len(asyncio.run(_listing(server)).resources) == 4
+    with pytest.raises(MCPError) as error:
+        asyncio.run(_read(server, f"{canonical}/view.md"))
+    assert error.value.code == -32603
+    assert error.value.message == "Could not read saved resource."
+    assert "private-render-marker" not in str(error.value) + caplog.text
+    assert asyncio.run(_read(server, canonical)).contents[0].text == record.model_dump_json()
+    assert database_path.read_bytes() == before
+    assert all(provider.calls == [] for provider in providers)
+
+
+@pytest.mark.parametrize("kind", ["artifact", "catalog"])
+def test_canonical_id_ending_in_view_suffix_keeps_json_precedence(
+    server, repository, saved_records, kind
+):
+    """Preserve a literal canonical ID even when it ends with the Markdown suffix."""
+    artifact, catalog = saved_records
+    if kind == "artifact":
+        canonical = "catalyst://business-artifact/ba_literal/view.md"
+        selected = artifact.model_copy(update={"id": "ba_literal/view.md", "uri": canonical})
+        repository.save_business_artifact(selected)
+    else:
+        canonical = "catalyst://use-case-catalog/uc_literal/view.md"
+        selected = catalog.model_copy(update={"id": "uc_literal/view.md"})
+        repository.save_use_case_catalog(selected)
+    content = asyncio.run(_read(server, canonical)).contents[0]
+    assert content.mime_type == "application/json"
+    assert json.loads(content.text) == selected.model_dump(mode="json")
+    markdown = asyncio.run(_read(server, f"{canonical}/view.md")).contents[0]
+    expected = render_business_artifact(selected) if kind == "artifact" else render_use_case_catalog(selected)
+    assert markdown.mime_type == "text/markdown"
+    assert markdown.text == expected
+
+
+@pytest.mark.parametrize("kind", ["artifact", "catalog"])
+def test_colliding_view_uris_are_not_advertised(server, repository, saved_records, kind):
+    """Reject duplicate URI metadata while preserving both exact canonical JSON reads."""
+    artifact, catalog = saved_records
+    base = artifact if kind == "artifact" else catalog
+    canonical = artifact.uri if kind == "artifact" else f"catalyst://use-case-catalog/{catalog.id}"
+    updates = {"id": f"{base.id}/view.md"}
+    if kind == "artifact":
+        updates["uri"] = f"{canonical}/view.md"
+    selected = base.model_copy(update=updates)
+    if kind == "artifact":
+        repository.save_business_artifact(selected)
+    else:
+        repository.save_use_case_catalog(selected)
+    with pytest.raises(MCPError) as error:
+        asyncio.run(_listing(server))
+    assert error.value.code == -32603
+    assert error.value.message == "Could not list saved resources."
+    assert json.loads(asyncio.run(_read(server, canonical)).contents[0].text) == base.model_dump(mode="json")
+    shadow = asyncio.run(_read(server, f"{canonical}/view.md")).contents[0]
+    assert shadow.mime_type == "application/json"
+    assert json.loads(shadow.text) == selected.model_dump(mode="json")
