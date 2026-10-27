@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 from mcp import Client
 
-from catalyst_mcp.llm_client import FakeAnalysisProvider
+from catalyst_mcp.llm_client import FakeAnalysisProvider, FakeIdeationProvider
 from catalyst_mcp.models import AnalyzeBusinessModelInput, BusinessArtifact, BusinessModel
 from catalyst_mcp.repository import SQLiteRepository
 from catalyst_mcp.server import create_server
@@ -52,7 +52,9 @@ def response_path(tmp_path, response_json):
 
 async def _call_tools(provider, repository, arguments, name="analyze-business-model"):
     """Discover and call a real SDK server in process on the asyncio backend."""
-    server = create_server(provider=provider, repository=repository)
+    server = create_server(
+        provider=provider, ideation_provider=FakeIdeationProvider(), repository=repository
+    )
     async with Client(server, raise_exceptions=True, read_timeout_seconds=5) as client:
         tools = await client.list_tools()
         results = [await client.call_tool(name, args) for args in arguments]
@@ -119,11 +121,11 @@ async def _stdio_exchange(database_path, response_paths, arguments):
 
 
 def test_discovery_preserves_exact_schemas(repository):
-    """Advertise only analysis, strict flat input and the complete Artifact shape."""
+    """Keep analysis's strict flat input and complete output alongside ideation."""
     provider = FakeAnalysisProvider()
     tools, results = asyncio.run(_call_tools(provider, repository, []))
     assert results == []
-    assert len(tools) == 1
+    assert [tool.name for tool in tools] == ["analyze-business-model", "ideate-use-case"]
     tool = tools[0]
     assert tool.name == "analyze-business-model"
     expected_input = AnalyzeBusinessModelInput.model_json_schema()
@@ -182,7 +184,7 @@ def test_unknown_tool_does_not_generate(repository, response_json):
     """Reject unregistered names without silently routing them to analysis."""
     provider = FakeAnalysisProvider(response_json)
     _, results = asyncio.run(_call_tools(
-        provider, repository, [{"businessContent": BUSINESS_CONTENT}], name="ideate-use-case"
+        provider, repository, [{"businessContent": BUSINESS_CONTENT}], name="unregistered-tool"
     ))
     assert results[0].is_error is True
     assert results[0].structured_content is None
@@ -266,7 +268,7 @@ def test_stdio_command_and_restart_preserve_results(database_path, response_path
     assert "tools" in initialized["capabilities"]
     assert "resources" not in initialized["capabilities"]
     assert "prompts" not in initialized["capabilities"]
-    assert [tool["name"] for tool in tools["tools"]] == ["analyze-business-model"]
+    assert [tool["name"] for tool in tools["tools"]] == ["analyze-business-model", "ideate-use-case"]
     assert "outputSchema" in tools["tools"][0]
     first = results[0]
     assert first["isError"] is False

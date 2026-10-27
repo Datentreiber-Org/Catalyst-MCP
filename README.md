@@ -5,11 +5,10 @@ then generate a saved Use-case Catalog linked to that artifact through MCP.
 
 The repository contains validated Business Artifact and Use-case Catalog models,
 SQLite persistence and deterministic Markdown renderers. A local stdio MCP server
-exposes `analyze-business-model` using scripted fake-provider responses. It
-validates generated content, assigns metadata and returns the complete committed
-Business Artifact. The ideation service validates exact idea counts and source
-references, then saves a complete Catalog with a scripted fake provider. Ideation
-exposure through MCP, resource readers and live model integration remain unimplemented.
+exposes `analyze-business-model` and `ideate-use-case` using scripted fake-provider
+responses. Both return complete committed records. Ideation validates the exact
+idea count and every source reference before saving its Catalog. Resource readers,
+resource links and live model integration remain unimplemented.
 
 ## Development setup
 
@@ -35,23 +34,33 @@ uv run --locked python -c "import catalyst_mcp; print(catalyst_mcp.__file__)"
 ## Run the stdio development server
 
 ```bash
-uv run --locked catalyst-mcp --database data/stdio-demo.sqlite3 --fake-response data/fake-analysis.json
+uv run --locked catalyst-mcp \
+  --database data/two-tool-demo.sqlite3 \
+  --fake-response data/fake-analysis.json \
+  --fake-ideation-response data/fake-ideation.json
 ```
 
 The command now starts an MCP server and waits for a client on stdin. It does not
 print a greeting. Application logs and the explicit fake-provider startup notice
 go to stderr; stdout carries MCP messages. Use `--help` to see its arguments.
 
-Both paths are explicit. Create the synthetic response file using the example
-below. Each provider call consumes one `--fake-response` file in order, including
-correction attempts. Repeat the option to supply additional responses, for example
-`--fake-response first.json --fake-response corrected.json`. Exhausting the script
-returns a tool error. No LLM or provider credentials are used.
+Create the two synthetic response files using the examples below. `--database`
+is required. The response options are optional and independent: `--fake-response`
+supplies analysis output and `--fake-ideation-response` supplies ideation output.
+Each provider call consumes its next file, including correction attempts. Repeat
+the corresponding option to supply more responses. An omitted or exhausted script
+returns a tool error when that provider is called. No LLM or credentials are used.
 
-The server currently advertises only `analyze-business-model`. Its input is
-`{"businessContent": "..."}` with a 20,000-character maximum and no extra fields.
-A successful call returns the complete saved artifact as `structuredContent` and
-matching JSON text, conforming to the advertised `outputSchema`. Failures have
+The server advertises exactly two tools, both rejecting extra input fields:
+
+| Tool | Input |
+|---|---|
+| `analyze-business-model` | Non-blank `businessContent`, maximum 20,000 characters |
+| `ideate-use-case` | Saved `artifactId`, integer `numberOfIdeas` from 1 to 10, optional non-blank `focus` or `null` |
+
+A successful call returns the complete saved artifact or Catalog as
+`structuredContent` and matching JSON text, conforming to its `outputSchema`. A
+Catalog has no `uri` field. Failures have
 `isError: true` and no structured success payload. Resources and resource links
 remain later steps; the canonical URI is already present inside the artifact.
 
@@ -62,7 +71,7 @@ version 2.3.0 recorded in `uv.lock`, with its documented
 ## Analysis over MCP
 
 Run this Python example from the repository root with the project's environment.
-It creates the synthetic file used above and launches the actual console command
+It creates the synthetic analysis file used above and launches the console command
 through the SDK client. It uses a separate demo database from the storage examples.
 
 ```python
@@ -128,14 +137,107 @@ text. The fake returns the supplied JSON; it performs no extraction. The final
 server exits. This is a local SDK-client check, separate from integration with a
 selected AI host or a live model.
 
-In `server.py`, `create_server` keeps the injected provider and repository in two
-small callbacks. `list_tools` advertises the exact schemas from our existing models.
-`call_tool` validates arguments, runs analysis in a worker thread and wraps the
-committed artifact in the MCP result. `_tool_error` logs a fixed failure summary
-and returns an error without echoing business text or provider exception details.
+In `server.py`, `create_server` keeps both injected providers and the shared
+repository in small callbacks. `list_tools` advertises the exact schemas from our
+models. `call_tool` dispatches the two registered names to `analyze` or `ideate`.
+Each validates its arguments, runs its service in a worker thread and returns the
+complete committed record. `_tool_error` logs the known operation name and a fixed
+failure summary without echoing business text or provider exception details.
 `run_stdio` connects the SDK's stdin/stdout streams to its server runner. The
 updated package `main` loads the explicit file paths, configures stderr logging
 and starts that runner. Imports do not start a server or create a database.
+
+## Two-tool MCP flow
+
+After the analysis example creates `data/fake-analysis.json`, run this example to
+create the ideation response file and call both tools through a new stdio process:
+
+```python
+import asyncio
+import json
+import sys
+from pathlib import Path
+
+from mcp import Client
+from mcp.client.stdio import StdioServerParameters
+
+from catalyst_mcp.repository import SQLiteRepository
+
+data_directory = Path("data").resolve()
+database_path = data_directory / "two-tool-demo.sqlite3"
+ideation_path = data_directory / "fake-ideation.json"
+ideation_path.write_text(json.dumps({"useCases": [{
+    "title": "Repair request triage", "focus": "Workshop efficiency",
+    "problem": "Staff manually route repair requests.",
+    "targetUsers": ["Workshop staff"],
+    "proposedSolution": "Classify repair requests and suggest a work queue.",
+    "businessElementAlignment": [{
+        "section": "activities", "element": "Repair bicycles",
+        "rationale": "Routes repair work to workshop staff.",
+    }],
+}]}), encoding="utf-8")
+
+
+async def demonstrate_two_tool_flow():
+    """Analyze, ideate with the returned ID and confirm both saved results."""
+    parameters = StdioServerParameters(
+        command=str(Path(sys.executable).with_name("catalyst-mcp")),
+        args=[
+            "--database", str(database_path),
+            "--fake-response", str(data_directory / "fake-analysis.json"),
+            "--fake-ideation-response", str(ideation_path),
+        ],
+    )
+    async with Client(parameters, read_timeout_seconds=10) as client:
+        tools = await client.list_tools()
+        print([tool.name for tool in tools.tools])
+        analysis = await client.call_tool("analyze-business-model", {
+            "businessContent": "Northstar Bikes repairs bicycles for cyclists.",
+        })
+        assert not analysis.is_error
+        artifact = analysis.structured_content
+        ideation = await client.call_tool("ideate-use-case", {
+            "artifactId": artifact["id"],
+            "numberOfIdeas": 1,
+            "focus": "Workshop efficiency",
+        })
+        assert not ideation.is_error
+        catalog = ideation.structured_content
+        assert json.loads(ideation.content[0].text) == catalog
+        print(catalog["useCases"][0]["title"])
+        print(catalog["sourceArtifact"]["id"] == artifact["id"])
+    repository = SQLiteRepository(database_path)
+    print(
+        repository.get_business_artifact(artifact["id"]).model_dump(mode="json") == artifact
+        and repository.get_use_case_catalog(catalog["id"]).model_dump(mode="json") == catalog
+    )
+
+
+asyncio.run(demonstrate_two_tool_flow())
+```
+
+Output printed by the client:
+
+```text
+['analyze-business-model', 'ideate-use-case']
+Repair request triage
+True
+True
+```
+
+The first `True` verifies the source association; the second verifies both complete
+saved records after the server exits. These are two explicit tool calls. Analysis
+does not automatically trigger ideation, and the scripted providers perform no
+extraction or idea generation. Source data remains unchanged during ideation.
+
+To ideate from a saved artifact after restarting, supply `--database` and only
+`--fake-ideation-response`; pass the saved ID to `ideate-use-case`. Both tools remain
+discoverable. Calls to analysis fail until an analysis script is supplied.
+
+`SourceArtifactNotFoundError` in `services.py` remains a `LookupError` subclass.
+It identifies a missing saved source so `ideate` can return a not-found tool error
+without misclassifying a provider's own lookup failure. These local fake-provider
+checks do not establish live-model quality or compatibility with a selected AI host.
 
 ## Tests
 
@@ -155,7 +257,8 @@ escaping, completeness and determinism. Analysis and ideation workflow tests use
 scripted fake providers to check limits, bounded correction, metadata, exact idea
 counts, source-element matches and failure atomicity. MCP tests use the official client in process and real console-command
 subprocesses, checking discovery, complete results, failures, restart persistence
-and JSON-RPC stdout. No live model provider or selected AI host is exercised.
+and JSON-RPC stdout. The full two-tool sequence and ideation after process restart
+are also exercised. No live model provider or selected AI host is exercised.
 
 - `tests/test_artifact_model.py` covers analysis input and Business
   Artifact validation.
@@ -175,6 +278,10 @@ and JSON-RPC stdout. No live model provider or selected AI host is exercised.
   and alignments, limits, correction, source preservation and failed-commit rollback.
 - `tests/test_artifact_mcp.py` covers analysis discovery and schemas, strict
   arguments, safe failure results, CLI startup and real stdio exchanges.
+- `tests/test_catalog_mcp.py` covers ideation discovery and schemas, strict
+  arguments, saved-source handling, complete results, correction and failed commits.
+- `tests/test_mcp_flow.py` covers both tools through real stdio, independent scripts,
+  ideation after restart and rejected count/alignment output.
 
 `markdown-it-py` is a development dependency used to parse Markdown in tests.
 The production renderer uses Python's standard library and the existing models.
@@ -470,7 +577,7 @@ insufficient-content `ValueError` without retrying. Provider and database failur
 propagate without a success result or a partially saved artifact.
 
 This verifies workflow behavior with a fake. Real analysis prompts, model quality,
-provider deadline enforcement, ideation exposure through MCP, resource readers and
+provider deadline enforcement, resource readers and
 selected-host integration remain later work.
 
 ## Ideation with a fake provider
@@ -541,7 +648,8 @@ The new code has four parts:
 
 The `max_number_of_ideas` keyword defaults to 10 and requires a positive integer.
 Invalid input raises `ValidationError`; a count above the configured maximum
-raises `ValueError`. A missing source raises `LookupError` before any provider call.
+raises `ValueError`. A missing source raises `SourceArtifactNotFoundError`, a
+`LookupError` subclass, before any provider call.
 Optional focus is preserved exactly, with omitted or `None` meaning no constraint.
 
 Malformed JSON, schema errors, wrong counts or invalid alignments get at most one
@@ -552,8 +660,8 @@ and database-save failures propagate without generation retries or partial Catal
 
 These fake-provider checks establish orchestration and valid references. They do
 not assess idea relevance, rationale quality or semantic focus compliance. The
-ideation MCP tool, CLI ideation scripts, live prompts, provider deadlines and real
-model evaluation remain later work.
+resource readers/links, live prompts, provider deadlines and real model evaluation
+remain later work. Both tools are exposed through MCP with independent CLI scripts.
 
 ## Build the package
 

@@ -18,6 +18,10 @@ from catalyst_mcp.models import (
 from catalyst_mcp.repository import SQLiteRepository
 
 
+class SourceArtifactNotFoundError(LookupError):
+    """The requested saved source is missing before ideation generation starts."""
+
+
 DEFAULT_MAX_BUSINESS_CONTENT_CHARS = 20_000
 DEFAULT_MAX_NUMBER_OF_IDEAS = 10
 
@@ -124,7 +128,7 @@ def ideate_use_case(
         raise ValueError(f"numberOfIdeas exceeds maximum of {max_number_of_ideas}")
     source = repository.get_business_artifact(request.artifactId)
     if source is None:
-        raise LookupError("Source Business Artifact was not found")
+        raise SourceArtifactNotFoundError("Source Business Artifact was not found")
 
     source_json = source.model_dump_json()
     correction = None
