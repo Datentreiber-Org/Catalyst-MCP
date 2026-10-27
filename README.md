@@ -8,7 +8,9 @@ a development setup, and validated Business Artifact and Use-case Catalog models
 with contract tests. Business Artifacts and Catalogs can be saved, read and listed
 through a SQLite repository, with Catalog source associations enforced by a
 foreign key. Both record types have deterministic Markdown renderers. MCP tools,
-resource readers and model integration are not implemented yet.
+resource readers and live model integration are not implemented yet. An analysis
+service now validates scripted fake-provider output, assigns metadata and returns
+the complete committed Business Artifact.
 
 ## Development setup
 
@@ -60,8 +62,9 @@ types in real temporary SQLite files. They check strict types, all 12 business-m
 sections, alignment structure, metadata consistency, source associations, JSON
 round trips, process restart persistence and failure rollback. Markdown tests for
 both record types parse the output as CommonMark and verify content preservation,
-escaping, completeness and determinism. These local tests do not call a fake or
-live model provider or connect to an MCP host.
+escaping, completeness and determinism. Analysis workflow tests use a scripted
+fake provider to check input limits, bounded correction, metadata and failure
+atomicity. No live model provider or MCP host is exercised.
 
 - `tests/test_artifact_model.py` covers analysis input and Business
   Artifact validation.
@@ -75,6 +78,8 @@ live model provider or connect to an MCP host.
   literal text, deterministic rendering and unchanged saved records.
 - `tests/test_catalog_markdown.py` covers Catalog metadata, source references,
   all case fields and alignments, literal text and unchanged saved records.
+- `tests/test_artifact_service.py` covers analysis with scripted responses,
+  correction limits, provider failures and a real SQLite commit failure.
 
 `markdown-it-py` is a development dependency used to parse Markdown in tests.
 The production renderer uses Python's standard library and the existing models.
@@ -99,8 +104,9 @@ Output:
 {'businessContent': 'Northstar Bikes repairs bicycles for cyclists.'}
 ```
 
-The class validates the supplied text. Generation and saving belong to later
-steps. Blank text and undocumented fields raise a Pydantic `ValidationError`.
+The class validates the supplied text. The analysis service below handles
+generation and saving. Blank text and undocumented fields raise a Pydantic
+`ValidationError`.
 
 ## Ideation and Catalog models
 
@@ -296,6 +302,81 @@ added to the Catalog or source reference.
 Like the artifact renderer, this returns text without model calls, database or
 file writes, source lookups or new timestamps. The MCP Markdown routes and host
 display remain later integration work.
+
+## Analysis with a fake provider
+
+This self-contained example uses synthetic text and a scripted response. The fake
+returns the supplied JSON; it does not extract information from the business text.
+
+```python
+import json
+
+from catalyst_mcp.llm_client import FakeAnalysisProvider
+from catalyst_mcp.models import BusinessModel
+from catalyst_mcp.repository import SQLiteRepository
+from catalyst_mcp.services import analyze_business_model
+
+sections = {section: [] for section in BusinessModel.model_fields}
+sections["endUsers"] = ["Cyclists"]
+sections["solutions"] = ["Bicycle repairs"]
+sections["activities"] = ["Repair bicycles"]
+sections["revenuesAndAdvantages"] = ["Repair fees"]
+provider = FakeAnalysisProvider(json.dumps({
+    "name": "Northstar Bikes",
+    "businessModel": sections,
+}))
+repository = SQLiteRepository("data/catalyst.sqlite3")
+artifact = analyze_business_model(
+    "Northstar Bikes repairs bicycles for cyclists and charges repair fees.",
+    provider=provider,
+    repository=repository,
+)
+print(artifact.name)
+print(artifact.businessModel.activities)
+print(repository.get_business_artifact(artifact.id) == artifact)
+```
+
+Output:
+
+```text
+Northstar Bikes
+['Repair bicycles']
+True
+```
+
+The returned `artifact` contains all 12 sections plus `id`, `name`, `uri`,
+`createdAt` and `updatedAt`. Its ID is `ba_` followed by a UUID4 hex value, its URI
+is `catalyst://business-artifact/{id}`, and both timestamps use the same UTC
+creation time. Each successful call creates a new record.
+
+The new code has three parts:
+
+- `AnalysisProvider` declares the `generate_business_model` operation: accept
+  business text and optional backend correction separately, and return JSON.
+  Providers satisfy this interface by implementing that method.
+- `FakeAnalysisProvider.__init__` stores an ordered script and starts an empty
+  call history. Its `generate_business_model` method records each call, then
+  returns the next JSON string or raises the next scripted exception. An exhausted
+  script raises `RuntimeError`.
+- `analyze_business_model` validates the text, asks the provider for generated
+  content, validates that content, adds metadata, saves and returns the complete
+  committed artifact. It uses the existing repository for transaction handling.
+
+The service accepts at most 20,000 Python characters by default. Override this
+through the positive integer `max_business_content_chars` keyword. It preserves
+input text without trimming or truncation. Blank or wrongly typed input raises
+`ValidationError`; oversized input raises `ValueError` before a provider call.
+
+Malformed JSON or schema-invalid output receives one corrective attempt. The
+`_ANALYSIS_CORRECTION` constant supplies fixed backend feedback; rejected model
+output and input text are not copied into it. Two invalid outputs raise
+`RuntimeError`. The existing non-empty model validator now emits the distinct
+`empty_business_model` error code, which the service translates into an
+insufficient-content `ValueError` without retrying. Provider and database failures
+propagate without a success result or a partially saved artifact.
+
+This verifies workflow behavior with a fake. Real analysis prompts, model quality,
+provider deadline enforcement, ideation and MCP integration remain later work.
 
 ## Build the package
 

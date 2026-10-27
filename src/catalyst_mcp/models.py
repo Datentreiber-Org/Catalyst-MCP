@@ -11,6 +11,7 @@ from pydantic import (
     StringConstraints,
     model_validator,
 )
+from pydantic_core import PydanticCustomError
 
 
 NonBlankText = Annotated[str, StringConstraints(pattern=r"\S")]
@@ -63,7 +64,10 @@ class BusinessModel(StrictModel):
     def require_business_content(self) -> Self:
         """Reject a model with no statements in any section."""
         if not any(self.model_dump().values()):
-            raise ValueError("businessModel must contain at least one statement")
+            raise PydanticCustomError(
+                "empty_business_model",
+                "businessModel must contain at least one statement",
+            )
         return self
 
 

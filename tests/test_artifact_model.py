@@ -136,8 +136,9 @@ def test_all_sections_are_required(business_model_payload, section):
 
 def test_entirely_empty_model_is_rejected():
     """Require at least one statement even when every section is present."""
-    with pytest.raises(ValidationError, match="at least one statement"):
+    with pytest.raises(ValidationError, match="at least one statement") as error:
         BusinessModel.model_validate({section: [] for section in BUSINESS_MODEL_SECTIONS})
+    assert error.value.errors()[0]["type"] == "empty_business_model"
 
 
 def test_unknown_section_is_rejected(business_model_payload):

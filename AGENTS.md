@@ -53,11 +53,11 @@ The proposed implementation uses one Python backend, the official MCP SDK, Pydan
 
 ## Implementation status
 
-The repository currently contains a placeholder entry point, a uv development setup, strict Business Artifact and Catalog models, SQLite persistence and deterministic Markdown renderers for both record types, with tests. Catalog source associations are enforced through a foreign key and checked against stored JSON on reads. MCP tools, resource readers, metadata assignment and model integration are not implemented. Runtime database-path settings, source lookup before generation, exact source-element and requested-count checks remain part of the later workflows. See the product document for open implementation choices.
+The repository currently contains a placeholder entry point, a uv development setup, strict Business Artifact and Catalog models, SQLite persistence and deterministic Markdown renderers for both record types, with tests. Catalog source associations are enforced through a foreign key and checked against stored JSON on reads. The analysis service validates text and scripted fake-provider output, allows one corrective attempt, assigns artifact metadata and returns the complete committed artifact. Its configurable input limit defaults to 20,000 Python characters. MCP tools, resource readers, live model integration and ideation are not implemented. Runtime settings, provider deadlines, Catalog metadata assignment, source lookup before ideation, exact source-element and requested-count checks remain later work. See the product document for open implementation choices.
 
 ## Implementation checklist
 
-Steps 1 through 7 are authorized and complete. Later steps remain unimplemented and require explicit authorization. Add only the dependencies, configuration, documentation, and tests needed by each authorized step.
+Steps 1 through 8 are authorized and complete. Later steps remain unimplemented and require explicit authorization. Add only the dependencies, configuration, documentation, and tests needed by each authorized step.
 
 Step 1 verification: Python 3.12.2, pytest 9.1.1, locked environment sync, package import, source-distribution and wheel builds, and placeholder command execution were verified. At that step, pytest collected zero tests and returned exit code 5 because no application tests existed yet.
 
@@ -73,6 +73,8 @@ Step 6 verification: 58 new Business Artifact Markdown cases passed alongside th
 
 Step 7 verification: 23 new Catalog Markdown cases passed alongside the 384 existing cases, for 407 passing tests on the same Python, Pydantic, pytest and Markdown parser versions. Parsed CommonMark verifies complete Catalog metadata, computed source URI, all cases, target users, solutions and alignment entries in saved order, exact section keys, empty target-user lists, literal text, long content and duplicate entries. Rendering is deterministic after JSON reloads and a separate-process read, with Catalog/source JSON, timestamps and saved files unchanged. All README storage and rendering examples ran successfully. The Catalog and its source reference still have no added URI field. MIME types, MCP routes and host display remain unimplemented and unverified; no provider calls were made.
 
+Step 8 verification: 34 new analysis service cases passed alongside the 407 existing cases, for 441 passing tests. They use a scripted fake provider and real temporary SQLite files to verify complete committed results, UUID4 IDs and UTC metadata, repeated creation, strict input validation, default and configured character limits, one corrective attempt with fixed feedback, insufficient-content errors, provider failures and rollback on a real commit failure. The existing empty-model contract test now checks its distinct error code. All seven README Python examples ran in a temporary directory. Source-distribution and wheel builds succeeded; both contain the new analysis modules, which also import directly from the wheel. No dependencies were added. The fake returns supplied JSON and establishes orchestration only; live extraction quality, real-model prompt-injection resistance, provider deadline enforcement and MCP-host integration remain unimplemented or unverified.
+
 - [x] 1. Verify Python 3.12+, repair package metadata's missing README, and establish the test setup.
 - [x] 2. Define and test Business Artifact input, generated-content, and saved-object models.
 - [x] 3. Define and test ideation input, generated-content, alignment, and Catalog models.
@@ -80,7 +82,7 @@ Step 7 verification: 23 new Catalog Markdown cases passed alongside the 384 exis
 - [x] 5. Add Catalog storage, retrieval, and listing with enforced source associations.
 - [x] 6. Render complete, deterministic Business Artifact Markdown.
 - [x] 7. Render complete, deterministic Catalog Markdown.
-- [ ] 8. Implement analysis generation, validation, bounded correction, and saving with a fake provider.
+- [x] 8. Implement analysis generation, validation, bounded correction, and saving with a fake provider.
 - [ ] 9. Implement ideation from a saved artifact with exact count and alignment validation using a fake provider.
 - [ ] 10. Start the stdio MCP server and expose the analysis tool with complete saved-object results.
 - [ ] 11. Expose the ideation tool and verify the two-tool flow with a fake provider.

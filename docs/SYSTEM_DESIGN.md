@@ -1,6 +1,6 @@
 # Catalyst MVP system design
 
-Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence and deterministic Markdown rendering for both record types, and their tests are implemented. MCP integration and generation remain proposed work.
+Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence, deterministic Markdown rendering and the analysis workflow with a scripted fake provider are implemented and tested. MCP integration, ideation and live generation remain proposed work.
 
 See [Product scope and requirements](PROJECT_CONTEXT.md) for the product contracts, scope and open choices. This document recommends implementation details, including create-only records, optional input focus, string-array entries, alignment objects and generation limits. These details remain proposals unless explicitly recorded as implementation decisions below.
 
@@ -106,7 +106,7 @@ The LLM generates only `name` and `businessModel`. The backend assigns `id`, `ur
 - Separate analysis input, generated content and the complete Business Artifact. Generated content cannot supply IDs, URIs or timestamps. The complete artifact requires every metadata field; these schemas do not generate metadata or persist records.
 - Validate the artifact URI against its ID using `catalyst://business-artifact/{id}`. Require timezone-aware timestamps with a zero UTC offset and equal `createdAt` and `updatedAt` values for create-only artifacts.
 - Use Python `datetime` objects when constructing complete artifacts in backend code. Use `model_validate_json` for JSON timestamp strings and `model_dump_json` or `model_dump(mode="json")` for JSON serialization.
-- Leave configurable input-size enforcement to the later analysis workflow. These schemas validate structure and content presence; they do not verify source support or business relevance.
+- Keep configurable input-size enforcement in the analysis workflow, implemented in step 8. These schemas validate structure and content presence; they do not verify source support or business relevance.
 
 ### ideate-use-case
 
@@ -289,6 +289,17 @@ Store each domain record once as JSON. The Markdown representation is derived on
 6. Repository saves it in one transaction.
 7. Return the same saved artifact to the host.
 
+#### Recorded analysis workflow decisions (step 8)
+
+- Add synchronous `analyze_business_model` in `services.py`, taking business text, an injected `AnalysisProvider` and the existing repository. The internal `max_business_content_chars` keyword defaults to 20,000 and must be a positive integer. Count Python string characters, preserve the input unchanged, and reject oversized text before calling the provider. Environment-based settings remain later work.
+- Define the provider's current analysis operation in `llm_client.py` using Python's structural [Protocol interface](https://docs.python.org/3.12/library/typing.html#typing.Protocol). It accepts business content as data and optional backend-authored correction feedback, and returns JSON containing only `name` and `businessModel`. A live implementation must honor the source-supported extraction contract and treat instructions in supplied content as data.
+- Add `FakeAnalysisProvider` with scripted JSON responses or exceptions and an in-memory call history. It performs no extraction, prompt composition, network access or relevance assessment. No live provider or provider timeout enforcement is selected in this step.
+- Parse each provider response with `GeneratedBusinessArtifact`. Allow one corrective call for malformed JSON or schema-invalid output, retaining the original business text and using fixed feedback without copying rejected values or raw validation errors into instructions. If both responses are invalid, raise a fixed `RuntimeError` summary without saving a record.
+- Tag the existing entirely-empty `BusinessModel` validation failure with the Pydantic error code `empty_business_model`, using its documented [custom validation error](https://docs.pydantic.dev/latest/concepts/validators/#raising-validation-errors). The service reports it as an insufficient-content `ValueError` and stops without a corrective call. This preserves the existing non-empty model rule while distinguishing it from malformed output.
+- After generated-content validation succeeds, assign `ba_` plus a UUID4 hex value, construct its canonical JSON URI, and use one `datetime.now(UTC)` value for both timestamps. Construct the complete artifact, save it through the repository, and return the committed object. Do not trigger ideation.
+- Generation and validation occur before the repository write transaction. Provider exceptions and database errors propagate without correction retries or success results; repository rollback handles failed writes and commits. MCP-specific failure mapping remains later work.
+- Verify the workflow with the scripted fake and real temporary SQLite files. These tests establish orchestration, validation and persistence behavior, not live extraction quality or resistance to prompt injection in a real model.
+
 ### Ideation request
 
 1. Host calls `ideate-use-case` with artifact ID, number of ideas and optional focus.
@@ -358,7 +369,7 @@ tests/
   test_mcp_flow.py
 ```
 
-The package entry point, Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and both renderers in `markdown_views.py` currently exist. Tests exist in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py`, `test_catalog_repository.py`, `test_artifact_markdown.py` and `test_catalog_markdown.py`. The repository creates both tables and enforces the Catalog-to-artifact foreign key; the renderers return text without storage changes. The other modules and test files above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names. Test examples currently live directly in those test modules; no fixtures directory has been added.
+The package entry point, Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and both renderers in `markdown_views.py` currently exist. `services.py` implements analysis only; `llm_client.py` contains its provider interface and scripted fake, with no live adapter yet. Tests exist in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py`, `test_catalog_repository.py`, `test_artifact_markdown.py`, `test_catalog_markdown.py` and `test_artifact_service.py`. The repository creates both tables and enforces the Catalog-to-artifact foreign key; the renderers return text without storage changes. The other modules and test files above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names. Test examples currently live directly in those test modules; no fixtures directory has been added.
 
 The prompt files contain backend generation instructions. They are not separately registered MCP Prompts in this MVP.
 
