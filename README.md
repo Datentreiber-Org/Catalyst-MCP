@@ -9,7 +9,9 @@ exposes `analyze-business-model` and `ideate-use-case` using scripted fake-provi
 responses. Both return complete committed records. Ideation validates the exact
 idea count and every source reference before saving its Catalog. Both saved types
 can be listed and read as canonical JSON and on-demand Markdown resources. Tool
-results link to both views. Live model integration remains unimplemented.
+results link to both views. OpenAI, Anthropic and local Ollama JSON clients and
+provider selection are implemented and tested with mocked HTTP. Connecting them to analysis and ideation
+remains steps 15 and 16; those workflows still use scripted fakes.
 
 ## Development setup
 
@@ -269,7 +271,9 @@ scripted fake providers to check limits, bounded correction, metadata, exact ide
 counts, source-element matches and failure atomicity. MCP tests use the official client in process and real console-command
 subprocesses, checking discovery, complete results, failures, restart persistence
 and JSON-RPC stdout. The full two-tool sequence and ideation after process restart
-are also exercised. No live model provider or selected AI host is exercised.
+are also exercised. OpenAI adapter checks use the real SDK with HTTPX mock
+transport to verify serialization, responses, failure handling, disabled retries
+and connection cleanup. No live model provider or selected AI host is exercised.
 JSON/Markdown resource checks verify complete data, native tool links, MIME types,
 exact URI matching, deterministic rendering, literal special characters, safe
 protocol errors, unchanged stored records and reads without provider calls.
@@ -299,6 +303,14 @@ protocol errors, unchanged stored records and reads without provider calls.
   resource formats after restart.
 - `tests/test_mcp_resource.py` covers JSON/Markdown discovery and reads, exact
   URIs, complete payloads, MIME types, determinism, safe errors and unchanged data/files.
+- `tests/test_llm_settings.py` covers provider/model selection, credentials,
+  finite positive timeouts, safe configuration errors and unsupported providers.
+- `tests/test_llm_client.py` covers the OpenAI JSON client through the actual SDK
+  with mocked HTTP, including schemas, request separation, failures and cleanup.
+- `tests/test_llm_anthropic.py` covers the real Anthropic SDK with mocked HTTP,
+  schema conversion, stop reasons, failures, credentials and cleanup.
+- `tests/test_llm_ollama.py` covers Ollama HTTP requests, configured origins,
+  completion checks, malformed envelopes, failures and cleanup.
 
 `markdown-it-py` is a development dependency used to parse Markdown in tests.
 The production renderer uses Python's standard library and the existing models.
@@ -845,8 +857,270 @@ and database-save failures propagate without generation retries or partial Catal
 
 These fake-provider checks establish orchestration and valid references. They do
 not assess idea relevance, rationale quality or semantic focus compliance. Live
-prompts, provider deadlines and real model evaluation remain later work. Both tools
+prompts, overall provider deadlines and real model evaluation remain later work. Both tools
 are exposed through MCP with independent CLI scripts.
+
+## LLM configuration and provider clients
+
+Step 14 is split into separately authorized parts: 14a adds shared configuration
+and OpenAI, 14b adds Anthropic, and 14c adds Ollama. All three parts are implemented
+with offline verification. Clients are available from Python; analysis and ideation prompt integration
+remain steps 15 and 16. The console command continues to use the scripted fakes.
+
+`LLMSettings.from_env()` reads these environment variables when called:
+
+| Variable | Meaning |
+|---|---|
+| `CATALYST_LLM_PROVIDER` | Required: `openai`, `anthropic` or `ollama` |
+| `CATALYST_LLM_MODEL` | Required model ID; no implicit model or fallback |
+| `OPENAI_API_KEY` | Required credential for OpenAI |
+| `ANTHROPIC_API_KEY` | Required credential for Anthropic |
+| `CATALYST_LLM_TIMEOUT_SECONDS` | Positive finite SDK network timeout; defaults to 60 |
+| `CATALYST_LLM_MAX_OUTPUT_TOKENS` | Positive integer output-token limit; defaults to 8192 |
+| `CATALYST_OLLAMA_HOST` | Ollama HTTP(S) origin; defaults to `http://localhost:11434` |
+
+Set these in the launching environment. No `.env` file is automatically loaded,
+and imports do not read configuration or make requests. The API key is held as a
+Pydantic `SecretStr`, excluded from the settings representation and serialization.
+Invalid environment configuration raises a fixed message without supplied values.
+Model access and Structured Outputs support must be verified for the chosen model.
+Only the selected cloud provider's key is read. Local Ollama needs no key and
+ignores cloud credentials. Its host must contain no username, password, path,
+query or fragment. No model is downloaded or started by these clients.
+
+The OpenAI client uses the official `openai` 2.x SDK, locked to 2.54.0, and its
+[Responses API](https://developers.openai.com/api/reference/python).
+It requests [Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs)
+using the supplied Pydantic model's JSON Schema, `strict: true` and `store: false`.
+Backend instructions and input data are separate request fields. The caller must
+supply an object schema supported by the chosen provider/model; both existing
+generated-content schemas are exercised in offline tests.
+
+The provider code has five classes and one selection function:
+
+- `LLMSettings` in `settings.py` validates provider, model, credential and timeout
+  values. `validate_api_key` rejects empty or whitespace-containing credentials.
+  `from_env` accepts an optional environment mapping for deterministic tests; it
+  reads values without loading files or changing the process environment.
+  `validate_provider_credentials` requires a key for cloud providers and keeps
+  local Ollama credential-free. `validate_ollama_host` validates the server origin.
+- `JSONClient` in `llm_client.py` is the shared `Protocol`: `generate_json` accepts
+  trusted instructions, input text and an output model, and returns completed
+  response text for the calling workflow to validate.
+- `OpenAIJSONClient` implements that contract. Its constructor captures settings
+  without I/O. `generate_json` opens one SDK client, makes one Responses request,
+  closes the client, rejects incomplete/failed responses, refusals and blank text,
+  then returns the original text. Timeouts become `TimeoutError`; other SDK API
+  failures become `RuntimeError`, with fixed messages and no provider details.
+- `AnthropicJSONClient` uses the official `anthropic` SDK, locked to 1.17.0.
+  Its constructor checks provider selection. `generate_json` calls Messages with
+  separate system/user content and `output_config.format`. The SDK's public
+  `transform_schema` helper prepares supported constraints without changing our
+  original models. Only `end_turn` with non-blank text succeeds; refusals and token
+  truncation fail. See [Anthropic Structured Outputs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs).
+- `OllamaJSONClient` implements the documented
+  [non-streaming chat endpoint](https://docs.ollama.com/api/chat) with HTTPX2 2.16.0.
+  Its constructor checks provider selection; `generate_json` sends system/user
+  messages and the schema as `format`, requires `done=true` and `done_reason=stop`,
+  and returns non-blank assistant text. This one-endpoint adapter uses HTTPX2
+  directly rather than adding another SDK. It sends no credentials, ignores
+  environment proxy settings, follows no redirects and never pulls a missing model.
+- `create_json_client(settings)` selects one of these three implementations.
+  It performs no I/O and provides no fallback to another provider or model.
+
+SDK retries are disabled. The existing services will remain responsible for
+validating generated content and making at most one corrective generation call
+when connected in later steps. The network timeout applies to connection, read,
+write and pool operations; it is not a total wall-clock deadline for a complete
+tool call. Cloud endpoints are explicit; Ollama uses the configured origin. Every
+request has no previous conversation history. OpenAI requests no stored response;
+that API-specific option is not sent to Anthropic or Ollama. Clients write no
+domain records. The token cap maps to OpenAI `max_output_tokens`, Anthropic
+`max_tokens`, or Ollama `options.num_predict`; an exhausted cap is a failure.
+Ollama has no separate refusal flag in this endpoint; generated-content validation
+remains essential. Its [Structured Outputs](https://docs.ollama.com/capabilities/structured-outputs)
+support is used with a local server; Ollama Cloud is outside this adapter's scope.
+
+This runnable example uses synthetic settings and mocked HTTP, so it makes no
+network request and needs no real API key:
+
+```python
+from unittest.mock import patch
+
+import httpx
+from openai import OpenAI
+from pydantic import BaseModel, ConfigDict
+
+from catalyst_mcp.llm_client import JSONClient, create_json_client
+from catalyst_mcp.settings import LLMSettings
+
+settings = LLMSettings.from_env({
+    "CATALYST_LLM_PROVIDER": "openai",
+    "CATALYST_LLM_MODEL": "synthetic-model",
+    "OPENAI_API_KEY": "synthetic-key",
+})
+
+
+class Label(BaseModel):
+    """Describe the JSON expected by this synthetic example."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    value: str
+
+
+reply = {
+    "id": "resp_synthetic", "object": "response", "created_at": 0,
+    "model": "synthetic-model", "status": "completed",
+    "parallel_tool_calls": False, "tool_choice": "auto", "tools": [],
+    "output": [{
+        "id": "msg_synthetic", "type": "message", "role": "assistant",
+        "status": "completed", "content": [{
+            "type": "output_text", "text": '{"value":"bicycle"}', "annotations": [],
+        }],
+    }],
+}
+transport = httpx.MockTransport(lambda request: httpx.Response(200, json=reply))
+sdk = OpenAI(
+    api_key="synthetic-key", timeout=60.0, max_retries=0,
+    http_client=httpx.Client(transport=transport, trust_env=False),
+)
+with patch("catalyst_mcp.llm_client.OpenAI", return_value=sdk):
+    client: JSONClient = create_json_client(settings)
+    text = client.generate_json(
+        instructions="Return JSON with value equal to the supplied word.",
+        input_text="bicycle", output_model=Label,
+    )
+    print(text)
+    print(Label.model_validate_json(text).value)
+print(sdk.is_closed())
+```
+
+Output:
+
+```text
+{"value":"bicycle"}
+bicycle
+True
+```
+
+The mock supplies the answer; this verifies transport and validation behavior.
+Live requests, credentials/model access, business quality, prompt-injection
+resistance and selected-host integration have not been verified.
+
+## Anthropic client example
+
+This example selects Anthropic from configuration and exercises its real SDK with
+a synthetic HTTP reply. No live API key or network access is needed:
+
+```python
+from unittest.mock import patch
+
+import httpx2
+from anthropic import Anthropic
+from pydantic import BaseModel, ConfigDict
+
+from catalyst_mcp.llm_client import create_json_client
+from catalyst_mcp.settings import LLMSettings
+
+
+class Label(BaseModel):
+    """Define the output for this synthetic transport example."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    value: str
+
+
+settings = LLMSettings.from_env({
+    "CATALYST_LLM_PROVIDER": "anthropic",
+    "CATALYST_LLM_MODEL": "synthetic-model",
+    "ANTHROPIC_API_KEY": "synthetic-key",
+})
+reply = {
+    "id": "msg_synthetic", "type": "message", "role": "assistant",
+    "model": "synthetic-model", "stop_reason": "end_turn", "stop_sequence": None,
+    "content": [{"type": "text", "text": '{"value":"bicycle"}'}],
+    "usage": {"input_tokens": 10, "output_tokens": 5},
+}
+http = httpx2.Client(
+    transport=httpx2.MockTransport(lambda request: httpx2.Response(200, json=reply)),
+    trust_env=False,
+)
+sdk = Anthropic(api_key="synthetic-key", http_client=http, max_retries=0)
+with patch("catalyst_mcp.llm_client.Anthropic", return_value=sdk):
+    text = create_json_client(settings).generate_json(
+        instructions="Return JSON with value equal to the supplied word.",
+        input_text="bicycle", output_model=Label,
+    )
+    print(text)
+    print(Label.model_validate_json(text).value)
+print(sdk.is_closed())
+```
+
+Output:
+
+```text
+{"value":"bicycle"}
+bicycle
+True
+```
+
+The adapter returns the complete text and closes the SDK client. The SDK may
+simplify constraints for its request schema; the original Pydantic model still
+enforces the full contract when the calling workflow validates the text.
+
+## Ollama client example
+
+This example selects a local model without credentials. Mocked HTTP provides the
+response, so it does not need an installed model or running Ollama server:
+
+```python
+from unittest.mock import patch
+
+import httpx2
+from pydantic import BaseModel, ConfigDict
+
+from catalyst_mcp.llm_client import create_json_client
+from catalyst_mcp.settings import LLMSettings
+
+
+class Label(BaseModel):
+    """Define the output for this synthetic local transport example."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+    value: str
+
+
+settings = LLMSettings.from_env({
+    "CATALYST_LLM_PROVIDER": "ollama",
+    "CATALYST_LLM_MODEL": "synthetic-local-model",
+})
+reply = {
+    "message": {"role": "assistant", "content": '{"value":"bicycle"}'},
+    "done": True, "done_reason": "stop",
+}
+http = httpx2.Client(
+    base_url=str(settings.ollama_host),
+    transport=httpx2.MockTransport(lambda request: httpx2.Response(200, json=reply)),
+    trust_env=False,
+)
+with patch("catalyst_mcp.llm_client.httpx2.Client", return_value=http):
+    text = create_json_client(settings).generate_json(
+        instructions="Return JSON with value equal to the supplied word.",
+        input_text="bicycle", output_model=Label,
+    )
+    print(text)
+    print(Label.model_validate_json(text).value)
+print(http.is_closed)
+```
+
+Output:
+
+```text
+{"value":"bicycle"}
+bicycle
+True
+```
+
+For a live check later, the configured local server must already be running with
+the selected model installed. Local model compatibility, quality and resource use
+remain unverified; these examples establish request/response behavior only.
 
 ## Build the package
 
