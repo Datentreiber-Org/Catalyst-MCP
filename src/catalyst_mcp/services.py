@@ -14,6 +14,8 @@ from catalyst_mcp.models import (
 from catalyst_mcp.repository import SQLiteRepository
 
 
+DEFAULT_MAX_BUSINESS_CONTENT_CHARS = 20_000
+
 _ANALYSIS_CORRECTION = (
     "Return valid JSON with only name and businessModel. "
     "Use a non-blank name and all 12 businessModel sections as arrays of "
@@ -27,7 +29,7 @@ def analyze_business_model(
     *,
     provider: AnalysisProvider,
     repository: SQLiteRepository,
-    max_business_content_chars: int = 20_000,
+    max_business_content_chars: int = DEFAULT_MAX_BUSINESS_CONTENT_CHARS,
 ) -> BusinessArtifact:
     """Validate analysis output, add metadata and return only after commit."""
     if type(max_business_content_chars) is not int or max_business_content_chars < 1:

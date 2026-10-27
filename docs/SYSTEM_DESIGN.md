@@ -1,6 +1,6 @@
 # Catalyst MVP system design
 
-Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence, deterministic Markdown rendering and the analysis workflow with a scripted fake provider are implemented and tested. MCP integration, ideation and live generation remain proposed work.
+Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence, deterministic Markdown rendering and the analysis workflow with a scripted fake provider are implemented and tested. The analysis tool is exposed over local MCP stdio. Resource readers, ideation and live generation remain proposed work; selected-host integration is unverified.
 
 See [Product scope and requirements](PROJECT_CONTEXT.md) for the product contracts, scope and open choices. This document recommends implementation details, including create-only records, optional input focus, string-array entries, alignment objects and generation limits. These details remain proposals unless explicitly recorded as implementation decisions below.
 
@@ -187,6 +187,18 @@ Implement against the protocol version supported by the selected SDK and host. T
 
 Return the full saved domain object in the tool result's `structuredContent`, conforming to its `outputSchema`. Also provide the serialized JSON in a text content block for client compatibility. These are MCP transport fields around the domain payload, not extra fields inside the Business Artifact or Catalog. See the [tool result specification](https://modelcontextprotocol.io/specification/draft/server/tools).
 
+### Recorded analysis MCP decisions (step 10)
+
+- Step 10 is authorized independently of step 9. Add only analysis discovery and execution; ideation remains unimplemented.
+- Select the official `mcp>=2.3.0,<3` dependency without CLI extras, recording the resolved version in `uv.lock`. Verify against the current [official SDK documentation](https://py.sdk.modelcontextprotocol.io/) and installed APIs.
+- Use the SDK's [low-level `Server`](https://py.sdk.modelcontextprotocol.io/advanced/low-level-server/) with `on_list_tools` and `on_call_tool` handlers in `server.py`. This allows reuse of the exact existing Pydantic input/output schemas and explicit strict argument validation, without the convenience layer's generated argument model or private SDK changes.
+- Advertise only `analyze-business-model`. Its sole input is `businessContent`; reject unknown fields and invalid types. Advertise and enforce the analysis service's default 20,000-character limit before generation, sharing that default as a named constant in `services.py`.
+- Run the synchronous analysis service in `asyncio.to_thread`. Return the complete committed artifact in `structuredContent` and serialized JSON text, with the existing payload unchanged. Resource handlers and links remain steps 12 and 13.
+- Return input and execution failures as `CallToolResult(is_error=True)` with fixed messages and no structured success payload. Distinguish invalid input, oversized input, unusable business content, timeouts, database errors and other execution failures without echoing rejected values, business text or provider exception details. Log only fixed failure summaries and successful record IDs to stderr.
+- Replace the greeting command with an argparse entry point requiring `--database PATH` and one or more `--fake-response PATH` arguments. Read the files as UTF-8 and pass their contents to the existing scripted fake. Each provider call consumes one file in order, including correction attempts; exhausted scripts fail explicitly. This is development-only configuration, with no default canned result, real adapter, environment settings or provider deadline enforcement.
+- Start stdio using the SDK's `stdio_server` and `Server.run` under `asyncio.run`. Importing the package or server must not start it, open a database or write output. CLI startup diagnostics and application logs use stderr; stdout carries MCP messages while serving.
+- Verify exact discovery/result shapes and failures with the official SDK client in process, then verify initialization, discovery, calls, persistence across server restart and clean JSON-RPC stdout through the actual console command. These are local protocol checks with a fake provider, separate from live-model and selected-host integration checks.
+
 ### Resource representations and discovery
 
 Each saved object has two representations:
@@ -260,7 +272,7 @@ Store each domain record once as JSON. The Markdown representation is derived on
 
 ### Recorded Business Artifact persistence decisions (step 4)
 
-- Use `SQLiteRepository` in `repository.py` with Python's built-in `sqlite3` module. Take an explicit file path, resolve it once, create missing parent directories, and reject empty paths and `:memory:`. Runtime path configuration remains later work.
+- Use `SQLiteRepository` in `repository.py` with Python's built-in `sqlite3` module. Take an explicit file path, resolve it once, create missing parent directories, and reject empty paths and `:memory:`. Step 10 adds an explicit CLI path argument; environment-based defaults remain later work.
 - Step 4 initially creates `business_artifacts`, with non-null `id` and `payload_json` columns and the ID as primary key. Step 5 adds the Catalog table below.
 - `save_business_artifact` accepts a complete `BusinessArtifact`. Serialize and revalidate it before opening the write transaction, including objects that may have been mutated since construction. Use a parameterized `INSERT`; never replace an existing row. Return the complete validated artifact only after commit succeeds.
 - `get_business_artifact` returns a complete validated artifact or `None` for an unknown ID. `list_business_artifacts` returns complete artifacts ordered by ID. Both validate stored JSON and check that the payload ID equals its row ID. Invalid or inconsistent stored records raise errors rather than being repaired or skipped.
@@ -361,6 +373,7 @@ tests/
   test_artifact_model.py       Business Artifact schema and validation tests
   test_catalog_model.py        Ideation, alignment and Catalog validation tests
   test_artifact_service.py
+  test_artifact_mcp.py         Analysis discovery, failures and real stdio checks
   test_catalog_service.py
   test_artifact_repository.py  Business Artifact storage, restart and rollback tests
   test_catalog_repository.py   Catalog storage, source association and rollback tests
@@ -369,7 +382,7 @@ tests/
   test_mcp_flow.py
 ```
 
-The package entry point, Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and both renderers in `markdown_views.py` currently exist. `services.py` implements analysis only; `llm_client.py` contains its provider interface and scripted fake, with no live adapter yet. Tests exist in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py`, `test_catalog_repository.py`, `test_artifact_markdown.py`, `test_catalog_markdown.py` and `test_artifact_service.py`. The repository creates both tables and enforces the Catalog-to-artifact foreign key; the renderers return text without storage changes. The other modules and test files above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names. Test examples currently live directly in those test modules; no fixtures directory has been added.
+The package entry point runs the stdio development server. Business Artifact and Catalog models in `models.py`, persistence for both record types in `repository.py`, and both renderers in `markdown_views.py` exist. `services.py` implements analysis only; `llm_client.py` contains its provider interface and scripted fake, with no live adapter yet. `server.py` registers analysis only, with strict schemas and complete committed results. Tests exist in `test_artifact_model.py`, `test_catalog_model.py`, `test_artifact_repository.py`, `test_catalog_repository.py`, `test_artifact_markdown.py`, `test_catalog_markdown.py`, `test_artifact_service.py` and `test_artifact_mcp.py`. The repository creates both tables and enforces the Catalog-to-artifact foreign key; the renderers return text without storage changes. The other modules and test files above are proposed additions. Domain-specific test filenames follow `test_<domain>_<component>.py` with short domain names and singular component names; the single-tool MCP tests use the `artifact` domain until a two-tool flow exists. Test examples currently live directly in those test modules; no fixtures directory has been added.
 
 The prompt files contain backend generation instructions. They are not separately registered MCP Prompts in this MVP.
 
