@@ -1070,8 +1070,29 @@ independent `--live-analysis` and `--live-ideation` options.
 | `CATALYST_LLM_MAX_OUTPUT_TOKENS` | Positive integer output-token limit; defaults to 8192 |
 | `CATALYST_OLLAMA_HOST` | Ollama HTTP(S) origin; defaults to `http://localhost:11434` |
 
-Set these in the launching environment. No `.env` file is automatically loaded,
-and imports do not read configuration or make requests. The API key is held as a
+For local setup, copy the configuration example from the repository root:
+
+```bash
+cp .env.example .env
+```
+
+Choose exactly one provider block in `.env`, commenting out OpenAI before
+uncommenting Claude or Ollama. Replace the selected cloud provider's placeholder
+key with your key; local Ollama needs no key and requires a running server with
+the selected model installed. OpenAI with `gpt-6.1-sol` is active in the example;
+change `CATALYST_LLM_MODEL` to use another supported model. Git ignores `.env`
+and allows `.env.example`, which contains only placeholder credentials.
+Load your local file explicitly when starting both tools:
+
+```bash
+uv run --locked --env-file .env catalyst-mcp \
+  --database data/catalyst.sqlite3 \
+  --live-analysis --live-ideation
+```
+
+You can also set these variables directly in the launching environment. No `.env`
+file is automatically loaded by Catalyst, and imports do not read configuration
+or make requests. The API key is held as a
 Pydantic `SecretStr`, excluded from the settings representation and serialization.
 Invalid environment configuration raises a fixed message without supplied values.
 Model access and Structured Outputs support must be verified for the chosen model.

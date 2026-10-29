@@ -113,4 +113,5 @@ Step 16 verification: 40 new Catalog-provider cases, five new CLI configuration 
 - [x] 14c. Add and test the local Ollama adapter and its configuration; mocked HTTP, no running-server check.
 - [x] 15. Connect the packaged analysis prompt to configured providers and explicit CLI mode; verified with mocked HTTP, no live-model check.
 - [x] 16. Connect the packaged ideation prompt to configured providers and independent CLI mode; verified with mocked HTTP, no live-model check.
+- [x] Add `.env.example` with OpenAI active and commented Claude/Ollama alternatives, plus local copy/load/switch instructions; all three configurations and Git ignore rules verified, 35 settings tests pass, no live model call.
 - [ ] 17. Verify restart persistence and the complete flow; separately assess live-model quality and selected-host compatibility.
