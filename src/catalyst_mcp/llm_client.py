@@ -12,7 +12,7 @@ from openai import APIError, APITimeoutError, OpenAI
 from pydantic import BaseModel
 
 from catalyst_mcp.settings import LLMSettings
-from catalyst_mcp.models import GeneratedBusinessArtifact
+from catalyst_mcp.models import GeneratedBusinessArtifact, GeneratedUseCaseCatalog
 
 
 class JSONClient(Protocol):
@@ -277,6 +277,42 @@ class IdeationProvider(Protocol):
         Correction feedback is authored separately by the backend.
         """
         ...
+
+
+class LLMIdeationProvider:
+    """Connect saved-artifact ideation instructions to a configured JSON client."""
+
+    def __init__(self, client: JSONClient) -> None:
+        """Load the fixed UTF-8 ideation prompt once, independently of the working directory."""
+        self._client = client
+        self._instructions = (
+            files("catalyst_mcp").joinpath("prompts", "ideate_use_case.md")
+            .read_text(encoding="utf-8")
+        )
+        if not self._instructions.strip():
+            raise ValueError("Ideation prompt must not be empty.")
+
+    def generate_use_cases(
+        self,
+        source_artifact_json: str,
+        number_of_ideas: int,
+        *,
+        focus: str | None = None,
+        correction: str | None = None,
+    ) -> str:
+        """Keep source/count/focus as data and return text for service validation."""
+        instructions = self._instructions
+        if correction is not None:
+            instructions += f"\n\nBackend correction requirements:\n{correction}"
+        return self._client.generate_json(
+            instructions=instructions,
+            input_text=json.dumps({
+                "sourceArtifact": json.loads(source_artifact_json),
+                "numberOfIdeas": number_of_ideas,
+                "focus": focus,
+            }, ensure_ascii=False),
+            output_model=GeneratedUseCaseCatalog,
+        )
 
 
 class FakeIdeationProvider:

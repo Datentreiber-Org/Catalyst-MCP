@@ -163,6 +163,35 @@ def test_missing_arguments_stop_before_generation(repository, arguments):
     assert repository.list_use_case_catalogs() == []
 
 
+@pytest.mark.parametrize("problem", [
+    "missing_provider", "missing_model", "missing_key", "invalid_provider", "conflicting_scripts",
+])
+def test_live_ideation_startup_errors_do_not_open_database(tmp_path, monkeypatch, problem):
+    """Validate explicit ideation setup on stderr before storage or model requests."""
+    monkeypatch.setenv("CATALYST_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("CATALYST_LLM_MODEL", "synthetic-model")
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-private-key-marker")
+    if problem == "missing_provider":
+        monkeypatch.delenv("CATALYST_LLM_PROVIDER")
+    elif problem == "missing_model":
+        monkeypatch.delenv("CATALYST_LLM_MODEL")
+    elif problem == "missing_key":
+        monkeypatch.delenv("OPENAI_API_KEY")
+    elif problem == "invalid_provider":
+        monkeypatch.setenv("CATALYST_LLM_PROVIDER", "private-invalid-provider-marker")
+    database_path = tmp_path / "live.sqlite3"
+    command = Path(sys.executable).with_name("catalyst-mcp")
+    arguments = [str(command), "--database", str(database_path), "--live-ideation"]
+    if problem == "conflicting_scripts":
+        arguments.extend(["--fake-ideation-response", str(tmp_path / "unused.json")])
+    result = subprocess.run(arguments, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 2 and result.stdout == ""
+    assert "error:" in result.stderr and "Traceback" not in result.stderr
+    assert "synthetic-private-key-marker" not in result.stderr
+    assert "private-invalid-provider-marker" not in result.stderr
+    assert not database_path.exists()
+
+
 def test_missing_source_is_distinct_and_does_not_consume_script(repository, source, generated_payload):
     """Report a missing source before generation, then accept the saved source ID."""
     provider = FakeIdeationProvider(json.dumps(generated_payload))

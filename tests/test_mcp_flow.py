@@ -37,9 +37,16 @@ def response_files(tmp_path):
     return analysis_path, ideation_path
 
 
-async def _stdio_flow(database_path, analysis_paths, ideation_paths, artifact_id=None):
+async def _stdio_flow(
+    database_path, analysis_paths, ideation_paths, artifact_id=None, *,
+    command=None, live_analysis=False, live_ideation=False,
+):
     """Run both tools, or ideation against a saved ID, while parsing every stdout line."""
-    args = [str(Path(sys.executable).with_name("catalyst-mcp")), "--database", str(database_path)]
+    args = [*(command or [str(Path(sys.executable).with_name("catalyst-mcp"))]), "--database", str(database_path)]
+    if live_analysis:
+        args.append("--live-analysis")
+    if live_ideation:
+        args.append("--live-ideation")
     for path in analysis_paths:
         args.extend(["--fake-response", str(path)])
     for path in ideation_paths:
@@ -283,3 +290,115 @@ def test_both_resource_formats_after_restart_without_provider_scripts(tmp_path, 
     repository = SQLiteRepository(database_path)
     assert repository.get_business_artifact(artifact["id"]).model_dump(mode="json") == artifact
     assert repository.get_use_case_catalog(catalog["id"]).model_dump(mode="json") == catalog
+
+
+@pytest.mark.parametrize("mode", ["ideation", "analysis", "both", "saved_source"])
+@pytest.mark.parametrize("correct_first", [False, True])
+def test_configured_stdio_generation_modes(tmp_path, response_files, monkeypatch, mode, correct_first):
+    """Run real CLI/stdio mode combinations with mocked Ollama and complete resource reads."""
+    analysis_path, ideation_path = response_files
+    analysis_json = analysis_path.read_text(encoding="utf-8")
+    ideation_json = ideation_path.read_text(encoding="utf-8")
+    live_analysis = mode in ("analysis", "both")
+    live_ideation = mode in ("ideation", "both", "saved_source")
+    ideation_replies = (["private-rejected-output-marker"] if correct_first else []) + [ideation_json]
+    reply_path = tmp_path / "http-replies.json"
+    reply_path.write_text(json.dumps({
+        "analysis": analysis_json, "ideation": ideation_replies,
+        "live_analysis": live_analysis, "live_ideation": live_ideation,
+    }), encoding="utf-8")
+    monkeypatch.setenv("CATALYST_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("CATALYST_LLM_MODEL", "synthetic-local-model")
+    monkeypatch.setenv("CATALYST_OLLAMA_HOST", "http://localhost:11434")
+    database_path = tmp_path / "configured.sqlite3"
+    artifact_id = None
+    original_source = None
+    if mode == "saved_source":
+        from catalyst_mcp.llm_client import FakeAnalysisProvider
+        from catalyst_mcp.services import analyze_business_model
+
+        original_source = analyze_business_model(
+            "Northstar Bikes repairs bicycles.", provider=FakeAnalysisProvider(analysis_json),
+            repository=SQLiteRepository(database_path),
+        )
+        artifact_id = original_source.id
+    fake_ideation_paths = []
+    if not live_ideation:
+        for index, text in enumerate(ideation_replies):
+            path = tmp_path / f"fake-ideation-{index}.json"
+            path.write_text(text, encoding="utf-8")
+            fake_ideation_paths.append(path)
+    bootstrap = '''
+import json
+import sys
+from pathlib import Path
+import httpx2
+import catalyst_mcp.llm_client as llm
+from catalyst_mcp import main
+
+script = json.loads(Path(sys.argv.pop(1)).read_text(encoding="utf-8"))
+real_http_client = httpx2.Client
+real_factory = llm.create_json_client
+selection_count = 0
+analysis_calls = 0
+ideation_calls = 0
+expected_ideation_calls = len(script["ideation"]) if script["live_ideation"] else 0
+
+def respond(request):
+    global analysis_calls, ideation_calls
+    body = json.loads(request.content)
+    data = json.loads(body["messages"][1]["content"])
+    assert body["stream"] is False
+    if "businessContent" in data:
+        analysis_calls += 1
+        assert script["live_analysis"]
+        text = script["analysis"]
+    else:
+        ideation_calls += 1
+        assert script["live_ideation"]
+        assert data["sourceArtifact"]["businessModel"]["activities"] == ["Repair bicycles"]
+        assert data["numberOfIdeas"] == 1 and data["focus"] == "Workshop efficiency"
+        assert "Propose Data & AI use cases" in body["messages"][0]["content"]
+        text = script["ideation"].pop(0)
+    return httpx2.Response(200, json={
+        "done": True, "done_reason": "stop", "message": {"role": "assistant", "content": text},
+    })
+
+def local_http_client(**options):
+    return real_http_client(**options, transport=httpx2.MockTransport(respond))
+
+def selected_client(settings):
+    global selection_count
+    selection_count += 1
+    return real_factory(settings)
+
+llm.httpx2.Client = local_http_client
+llm.create_json_client = selected_client
+main()
+assert selection_count == 1
+assert analysis_calls == (1 if script["live_analysis"] else 0)
+assert ideation_calls == expected_ideation_calls
+'''
+    tools, artifact, result, stderr, wire = asyncio.run(_stdio_flow(
+        database_path, [] if live_analysis or mode == "saved_source" else [analysis_path],
+        fake_ideation_paths, artifact_id,
+        command=[sys.executable, "-c", bootstrap, str(reply_path)],
+        live_analysis=live_analysis, live_ideation=live_ideation,
+    ))
+    assert [tool["name"] for tool in tools["tools"]] == ["analyze-business-model", "ideate-use-case"]
+    assert result["isError"] is False
+    catalog = UseCaseCatalog.model_validate_json(result["content"][0]["text"])
+    source_id = original_source.id if original_source is not None else artifact["id"]
+    assert catalog.sourceArtifact.id == source_id
+    reopened = SQLiteRepository(database_path)
+    assert reopened.get_use_case_catalog(catalog.id) == catalog
+    if original_source is not None:
+        assert reopened.get_business_artifact(source_id) == original_source
+    else:
+        assert reopened.get_business_artifact(source_id).model_dump(mode="json") == artifact
+    assert wire and "no LLM is connected" not in stderr
+    if live_ideation:
+        assert "live ideation provider=ollama" in stderr
+    if live_analysis:
+        assert "live analysis provider=ollama" in stderr
+    assert "private-rejected-output-marker" not in stderr

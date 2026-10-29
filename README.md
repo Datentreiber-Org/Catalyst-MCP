@@ -10,9 +10,9 @@ responses. Both return complete committed records. Ideation validates the exact
 idea count and every source reference before saving its Catalog. Both saved types
 can be listed and read as canonical JSON and on-demand Markdown resources. Tool
 results link to both views. OpenAI, Anthropic and local Ollama JSON clients and
-provider selection are implemented and tested with mocked HTTP. Analysis can use
-the configured provider with a packaged extraction prompt and `--live-analysis`.
-Ideation still uses scripted responses; its live integration remains step 16.
+provider selection are implemented and tested with mocked HTTP. Analysis and
+ideation can each use the configured provider with packaged prompts and explicit
+`--live-analysis` and `--live-ideation` options.
 
 ## Development setup
 
@@ -64,10 +64,25 @@ uv run --locked catalyst-mcp --database data/catalyst.sqlite3 --live-analysis
 
 `--live-analysis` and `--fake-response` are mutually exclusive. An environment
 setting alone never enables live calls. Startup validates the selected provider's
-configuration and packaged prompt before opening the database, without calling
-the model. Generation starts only when `analyze-business-model` is called.
-`--fake-ideation-response` can still supply scripted ideation in this mode; live
-ideation remains step 16. Resource reads use saved data without another model call.
+configuration and selected packaged prompts before opening the database, without
+calling the model. Generation starts only when the corresponding tool is called.
+`--fake-ideation-response` can still supply scripted ideation in this mode.
+
+To enable both tools with the same configured provider/model:
+
+```bash
+uv run --locked catalyst-mcp --database data/catalyst.sqlite3 --live-analysis --live-ideation
+```
+
+`--live-ideation` and `--fake-ideation-response` are mutually exclusive. Either tool
+may independently use live or scripted generation. `--live-ideation` also works
+alone against an artifact already saved in the selected database. When both live
+flags are supplied, configuration is loaded once and the two prompt bridges share
+one stateless JSON client. Each generation request still owns its connection and
+sends its own complete input; no conversation history is shared. The tools remain
+two separate calls, and analysis never automatically triggers ideation. Default
+fake/resource-only startup needs no LLM settings. Resource reads use saved data
+without another model call.
 
 The server advertises exactly two tools, both rejecting extra input fields:
 
@@ -312,13 +327,16 @@ protocol errors, unchanged stored records and reads without provider calls.
   through all three adapters with mocked HTTP.
 - `tests/test_catalog_service.py` covers ideation from saved sources, exact counts
   and alignments, limits, correction, source preservation and failed-commit rollback.
+- `tests/test_catalog_provider.py` covers the packaged ideation prompt, source/count/focus
+  data, corrections and complete MCP/storage results through all three adapters
+  with mocked HTTP, including failed-generation atomicity and source preservation.
 - `tests/test_artifact_mcp.py` covers analysis discovery and schemas, strict
   arguments, safe failure results, CLI startup and real stdio exchanges.
 - `tests/test_catalog_mcp.py` covers ideation discovery and schemas, strict
   arguments, saved-source handling, complete results, correction and failed commits.
 - `tests/test_mcp_flow.py` covers both tools through real stdio, independent scripts,
   ideation after restart, rejected count/alignment output, tool links and both
-  resource formats after restart.
+  resource formats after restart, plus configured mixed/live modes with mocked HTTP.
 - `tests/test_mcp_resource.py` covers JSON/Markdown discovery and reads, exact
   URIs, complete payloads, MIME types, determinism, safe errors and unchanged data/files.
 - `tests/test_llm_settings.py` covers provider/model selection, credentials,
@@ -952,12 +970,93 @@ not assess idea relevance, rationale quality or semantic focus compliance. Live
 prompts, overall provider deadlines and real model evaluation remain later work. Both tools
 are exposed through MCP with independent CLI scripts.
 
+## Ideation with the configured provider
+
+`LLMIdeationProvider` connects saved-artifact ideation to any `JSONClient`. Its
+constructor loads the packaged UTF-8 `prompts/ideate_use_case.md` file once through
+`importlib.resources`, independently of the working directory. Missing or empty
+prompts fail before generation. These are backend instructions, not an MCP Prompt.
+
+`generate_use_cases` decodes the saved artifact JSON and sends a separate JSON
+input object containing the complete `sourceArtifact`, integer `numberOfIdeas`
+and `focus` (including `null` when absent). It requests `GeneratedUseCaseCatalog`
+and returns response text unchanged. Only backend correction requirements are
+added to trusted instructions for that call; source/focus values and rejected
+output are never interpolated into those instructions.
+
+The prompt requests exactly the specified number of Data & AI proposals, all
+documented fields including `targetUsers`, and at least one exact source alignment
+per case. An alignment must copy an entire element from its named saved section,
+including case, Unicode and whitespace. Ideas are proposals rather than claims
+about existing systems, datasets, measured pain points or results. When a problem
+is not stated in the source, the prompt asks for an opportunity or hypothesis.
+The existing service still loads the source before generation, enforces count and
+alignment, allows one correction, assigns metadata and commits atomically.
+
+After the storage examples create `ba_demo`, this runnable example demonstrates
+the complete bridge with a scripted JSON client, without a live API request:
+
+```python
+import json
+from unittest.mock import Mock
+
+from catalyst_mcp.llm_client import JSONClient, LLMIdeationProvider
+from catalyst_mcp.repository import SQLiteRepository
+from catalyst_mcp.services import ideate_use_case
+
+repository = SQLiteRepository("data/catalyst.sqlite3")
+source = repository.get_business_artifact("ba_demo")
+client = Mock(spec=JSONClient)
+client.generate_json.return_value = json.dumps({"useCases": [{
+    "title": "Repair request triage", "focus": "Workshop efficiency",
+    "problem": "Opportunity to route repair requests consistently.",
+    "targetUsers": ["Workshop staff"],
+    "proposedSolution": "Classify repair requests and suggest a work queue.",
+    "businessElementAlignment": [{
+        "section": "activities", "element": "Repair bicycles",
+        "rationale": "Supports routing repair work.",
+    }],
+}]})
+catalog = ideate_use_case(
+    source.id, 1, focus="Workshop efficiency",
+    provider=LLMIdeationProvider(client), repository=repository,
+)
+print(catalog.useCases[0].title)
+print(len(catalog.useCases))
+print(catalog.sourceArtifact.id)
+alignment = catalog.useCases[0].businessElementAlignment[0]
+print(f"{alignment.section}: {alignment.element}")
+print(
+    repository.get_use_case_catalog(catalog.id) == catalog
+    and repository.get_business_artifact(source.id) == source
+)
+```
+
+Output:
+
+```text
+Repair request triage
+1
+ba_demo
+activities: Repair bicycles
+True
+```
+
+The last `True` verifies the complete saved Catalog and unchanged source. For an
+actual configured call, use
+`LLMIdeationProvider(create_json_client(LLMSettings.from_env()))`, or enable
+`--live-ideation` in the console command. Integration tests exercise all three
+real clients with mocked HTTP. Real stdio checks cover ideation from an existing
+artifact, both live tools, mixed fake/live modes and correction, including reads
+of both JSON and Markdown resources. These checks do not establish live idea
+quality, semantic focus compliance, prompt-injection resistance or host support.
+
 ## LLM configuration and provider clients
 
 Step 14 is split into separately authorized parts: 14a adds shared configuration
 and OpenAI, 14b adds Anthropic, and 14c adds Ollama. All three parts are implemented
-with offline verification. Clients are available from Python and through
-`--live-analysis` for analysis. Live ideation prompt integration remains step 16.
+with offline verification. Clients are available from Python and through the
+independent `--live-analysis` and `--live-ideation` options.
 
 `LLMSettings.from_env()` reads these environment variables when called:
 
