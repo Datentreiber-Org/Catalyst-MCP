@@ -10,8 +10,9 @@ responses. Both return complete committed records. Ideation validates the exact
 idea count and every source reference before saving its Catalog. Both saved types
 can be listed and read as canonical JSON and on-demand Markdown resources. Tool
 results link to both views. OpenAI, Anthropic and local Ollama JSON clients and
-provider selection are implemented and tested with mocked HTTP. Connecting them to analysis and ideation
-remains steps 15 and 16; those workflows still use scripted fakes.
+provider selection are implemented and tested with mocked HTTP. Analysis can use
+the configured provider with a packaged extraction prompt and `--live-analysis`.
+Ideation still uses scripted responses; its live integration remains step 16.
 
 ## Development setup
 
@@ -53,6 +54,20 @@ supplies analysis output and `--fake-ideation-response` supplies ideation output
 Each provider call consumes its next file, including correction attempts. Repeat
 the corresponding option to supply more responses. An omitted or exhausted script
 returns a tool error when that provider is called. No LLM or credentials are used.
+
+To use a configured provider for analysis, set the environment variables described
+under [LLM configuration](#llm-configuration-and-provider-clients), then run:
+
+```bash
+uv run --locked catalyst-mcp --database data/catalyst.sqlite3 --live-analysis
+```
+
+`--live-analysis` and `--fake-response` are mutually exclusive. An environment
+setting alone never enables live calls. Startup validates the selected provider's
+configuration and packaged prompt before opening the database, without calling
+the model. Generation starts only when `analyze-business-model` is called.
+`--fake-ideation-response` can still supply scripted ideation in this mode; live
+ideation remains step 16. Resource reads use saved data without another model call.
 
 The server advertises exactly two tools, both rejecting extra input fields:
 
@@ -292,6 +307,9 @@ protocol errors, unchanged stored records and reads without provider calls.
   all case fields and alignments, literal text and unchanged saved records.
 - `tests/test_artifact_service.py` covers analysis with scripted responses,
   correction limits, provider failures and a real SQLite commit failure.
+- `tests/test_artifact_provider.py` covers the packaged analysis prompt, separate
+  source data, correction, and the complete configured-provider/MCP/storage path
+  through all three adapters with mocked HTTP.
 - `tests/test_catalog_service.py` covers ideation from saved sources, exact counts
   and alignments, limits, correction, source preservation and failed-commit rollback.
 - `tests/test_artifact_mcp.py` covers analysis discovery and schemas, strict
@@ -774,8 +792,82 @@ output and input text are not copied into it. Two invalid outputs raise
 insufficient-content `ValueError` without retrying. Provider and database failures
 propagate without a success result or a partially saved artifact.
 
-This verifies workflow behavior with a fake. Real analysis prompts, model quality,
-provider deadline enforcement and selected-host integration remain later work.
+This verifies workflow behavior with a fake. The configured-provider bridge below
+adds the real analysis prompt; live model quality, overall provider deadlines and
+selected-host integration remain unverified or later work.
+
+## Analysis with the configured provider
+
+`LLMAnalysisProvider` connects the existing analysis workflow to any `JSONClient`.
+Its constructor loads `prompts/analyze_business_model.md` through
+`importlib.resources`, so the same UTF-8 prompt works from source and an installed
+wheel regardless of the working directory. Missing or empty prompts fail before
+generation. The prompt is internal backend content, not a registered MCP Prompt.
+
+`generate_business_model` sends business text as a separate JSON data object:
+`{"businessContent": "..."}`. It requests the existing `GeneratedBusinessArtifact`
+schema and returns the response text unchanged. Backend correction requirements
+are appended to the trusted instructions for that call only; rejected output and
+business text are never inserted into those instructions. The service continues
+to own validation, its one-correction limit, metadata and atomic saving.
+
+The prompt defines all 12 sections, distinguishes user/buyer/decision-maker roles,
+requires source-supported statements and leaves unsupported sections empty. It
+uses `Unnamed business` when the text gives no business name. If no usable facts
+can be extracted, it requests all arrays empty so the existing service returns an
+insufficient-content error without saving. These instructions follow official
+guidance on [insufficient input](https://developers.openai.com/api/docs/guides/structured-outputs)
+and [separating untrusted data](https://developers.openai.com/api/docs/guides/agent-builder-safety).
+They still need live quality and prompt-injection evaluation.
+
+This example uses a scripted JSON client to demonstrate the complete bridge
+without a paid API request or a local model server:
+
+```python
+import json
+from unittest.mock import Mock
+
+from catalyst_mcp.llm_client import JSONClient, LLMAnalysisProvider
+from catalyst_mcp.models import BusinessModel
+from catalyst_mcp.repository import SQLiteRepository
+from catalyst_mcp.services import analyze_business_model
+
+sections = {key: [] for key in BusinessModel.model_fields}
+sections["endUsers"] = ["Cyclists"]
+sections["activities"] = ["Repair bicycles"]
+client = Mock(spec=JSONClient)
+client.generate_json.return_value = json.dumps({
+    "name": "Northstar Bikes", "businessModel": sections,
+})
+repository = SQLiteRepository("data/prompt-analysis-demo.sqlite3")
+artifact = analyze_business_model(
+    "Northstar Bikes repairs bicycles for cyclists.",
+    provider=LLMAnalysisProvider(client), repository=repository,
+)
+print(artifact.name)
+print(artifact.businessModel.activities)
+print(len(artifact.businessModel.model_dump()))
+print(repository.get_business_artifact(artifact.id) == artifact)
+print(json.loads(client.generate_json.call_args.kwargs["input_text"])["businessContent"])
+```
+
+Output:
+
+```text
+Northstar Bikes
+['Repair bicycles']
+12
+True
+Northstar Bikes repairs bicycles for cyclists.
+```
+
+For an actual configured call, construct the bridge with
+`LLMAnalysisProvider(create_json_client(LLMSettings.from_env()))`. The CLI does this
+only when `--live-analysis` is selected. Credentials/model access and local model
+availability must be configured by the caller; no default model or fallback is
+introduced. New integration tests use the real SDKs/HTTP clients with mocked
+responses, and a subprocess checks the live-analysis stdio path with a mocked
+Ollama endpoint. Those checks do not establish real extraction quality.
 
 ## Ideation with a fake provider
 
@@ -864,8 +956,8 @@ are exposed through MCP with independent CLI scripts.
 
 Step 14 is split into separately authorized parts: 14a adds shared configuration
 and OpenAI, 14b adds Anthropic, and 14c adds Ollama. All three parts are implemented
-with offline verification. Clients are available from Python; analysis and ideation prompt integration
-remain steps 15 and 16. The console command continues to use the scripted fakes.
+with offline verification. Clients are available from Python and through
+`--live-analysis` for analysis. Live ideation prompt integration remains step 16.
 
 `LLMSettings.from_env()` reads these environment variables when called:
 

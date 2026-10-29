@@ -1,5 +1,7 @@
 """Configured JSON generation, workflow contracts and scripted fakes."""
 
+import json
+from importlib.resources import files
 from typing import Protocol
 
 import httpx2
@@ -10,6 +12,7 @@ from openai import APIError, APITimeoutError, OpenAI
 from pydantic import BaseModel
 
 from catalyst_mcp.settings import LLMSettings
+from catalyst_mcp.models import GeneratedBusinessArtifact
 
 
 class JSONClient(Protocol):
@@ -206,6 +209,33 @@ class AnalysisProvider(Protocol):
         authored by the backend, separately from the supplied business text.
         """
         ...
+
+
+class LLMAnalysisProvider:
+    """Connect the packaged analysis instructions to a configured JSON client."""
+
+    def __init__(self, client: JSONClient) -> None:
+        """Load the fixed package prompt once, independently of the working directory."""
+        self._client = client
+        self._instructions = (
+            files("catalyst_mcp").joinpath("prompts", "analyze_business_model.md")
+            .read_text(encoding="utf-8")
+        )
+        if not self._instructions.strip():
+            raise ValueError("Analysis prompt must not be empty.")
+
+    def generate_business_model(
+        self, business_content: str, *, correction: str | None = None
+    ) -> str:
+        """Keep business data out of instructions and return JSON for service validation."""
+        instructions = self._instructions
+        if correction is not None:
+            instructions += f"\n\nBackend correction requirements:\n{correction}"
+        return self._client.generate_json(
+            instructions=instructions,
+            input_text=json.dumps({"businessContent": business_content}, ensure_ascii=False),
+            output_model=GeneratedBusinessArtifact,
+        )
 
 
 class FakeAnalysisProvider:

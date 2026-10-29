@@ -61,9 +61,11 @@ async def _call_tools(provider, repository, arguments, name="analyze-business-mo
     return tools.tools, results
 
 
-async def _stdio_exchange(database_path, response_paths, arguments):
+async def _stdio_exchange(database_path, response_paths, arguments, *, command=None, live_analysis=False):
     """Speak JSON-RPC to the installed console command and check every stdout line."""
-    command_args = [str(COMMAND), "--database", str(database_path)]
+    command_args = [*(command or [str(COMMAND)]), "--database", str(database_path)]
+    if live_analysis:
+        command_args.append("--live-analysis")
     for path in response_paths:
         command_args.extend(["--fake-response", str(path)])
     process = await asyncio.create_subprocess_exec(
@@ -357,3 +359,101 @@ def test_import_has_no_server_side_effects(tmp_path):
     assert result.returncode == 0
     assert result.stdout == result.stderr == ""
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("problem", [
+    "missing_provider", "missing_model", "missing_key", "invalid_provider", "conflicting_scripts",
+])
+def test_live_analysis_startup_errors_do_not_open_database(tmp_path, response_path, monkeypatch, problem):
+    """Reject incomplete/ambiguous live setup on stderr before opening storage or calling a model."""
+    monkeypatch.setenv("CATALYST_LLM_PROVIDER", "openai")
+    monkeypatch.setenv("CATALYST_LLM_MODEL", "synthetic-model")
+    monkeypatch.setenv("OPENAI_API_KEY", "synthetic-private-key-marker")
+    if problem == "missing_provider":
+        monkeypatch.delenv("CATALYST_LLM_PROVIDER")
+    elif problem == "missing_model":
+        monkeypatch.delenv("CATALYST_LLM_MODEL")
+    elif problem == "missing_key":
+        monkeypatch.delenv("OPENAI_API_KEY")
+    elif problem == "invalid_provider":
+        monkeypatch.setenv("CATALYST_LLM_PROVIDER", "private-invalid-provider-marker")
+    database_path = tmp_path / "live.sqlite3"
+    arguments = [str(COMMAND), "--database", str(database_path), "--live-analysis"]
+    if problem == "conflicting_scripts":
+        arguments.extend(["--fake-response", str(response_path)])
+    result = subprocess.run(arguments, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 2 and result.stdout == ""
+    assert "error:" in result.stderr and "Traceback" not in result.stderr
+    assert "synthetic-private-key-marker" not in result.stderr
+    assert "private-invalid-provider-marker" not in result.stderr
+    assert not database_path.exists()
+
+
+def test_fake_mode_ignores_unselected_llm_environment(database_path, response_path, monkeypatch):
+    """An environment setting alone never enables live analysis or breaks scripted use."""
+    monkeypatch.setenv("CATALYST_LLM_PROVIDER", "unsupported-private-provider")
+    _, _, results, stderr, _ = asyncio.run(_stdio_exchange(
+        database_path, [response_path], [{"businessContent": BUSINESS_CONTENT}],
+    ))
+    assert results[0]["isError"] is False
+    assert "no LLM is connected" in stderr
+    assert "unsupported-private-provider" not in stderr
+
+
+@pytest.mark.parametrize("correct_first", [False, True])
+def test_live_analysis_stdio_with_mocked_ollama(
+    database_path, response_json, tmp_path, monkeypatch, correct_first
+):
+    """Run the real CLI/stdio path with a mocked local API, without a model server."""
+    responses = (["private-rejected-output-marker"] if correct_first else []) + [response_json]
+    script_path = tmp_path / "scripted-http.json"
+    script_path.write_text(json.dumps(responses), encoding="utf-8")
+    monkeypatch.setenv("CATALYST_LLM_PROVIDER", "ollama")
+    monkeypatch.setenv("CATALYST_LLM_MODEL", "synthetic-local-model")
+    monkeypatch.setenv("CATALYST_OLLAMA_HOST", "http://localhost:11434")
+    # Only HTTP is replaced inside the child process; main, prompt loading and MCP are real.
+    bootstrap = '''
+import json
+import sys
+from pathlib import Path
+import httpx2
+import catalyst_mcp.llm_client as llm
+from catalyst_mcp import main
+
+replies = json.loads(Path(sys.argv.pop(1)).read_text(encoding="utf-8"))
+expected_count = len(replies)
+calls = []
+real_client = httpx2.Client
+
+def respond(request):
+    payload = json.loads(request.content)
+    calls.append(payload)
+    assert payload["stream"] is False
+    assert "businessContent" in json.loads(payload["messages"][1]["content"])
+    assert "Extract a business model" in payload["messages"][0]["content"]
+    text = replies.pop(0)
+    return httpx2.Response(200, json={
+        "done": True, "done_reason": "stop",
+        "message": {"role": "assistant", "content": text},
+    })
+
+def local_http_client(**options):
+    return real_client(**options, transport=httpx2.MockTransport(respond))
+
+llm.httpx2.Client = local_http_client
+main()
+assert len(calls) == expected_count and not replies
+'''
+    initialized, tools, results, stderr, wire = asyncio.run(_stdio_exchange(
+        database_path, [], [{"businessContent": BUSINESS_CONTENT}],
+        command=[sys.executable, "-c", bootstrap, str(script_path)], live_analysis=True,
+    ))
+    assert initialized["serverInfo"]["name"] == "Catalyst"
+    assert [tool["name"] for tool in tools["tools"]] == ["analyze-business-model", "ideate-use-case"]
+    assert results[0]["isError"] is False
+    artifact = BusinessArtifact.model_validate_json(results[0]["content"][0]["text"])
+    assert results[0]["structuredContent"] == artifact.model_dump(mode="json")
+    assert SQLiteRepository(database_path).get_business_artifact(artifact.id) == artifact
+    assert len(wire) == 3
+    assert "live analysis provider=ollama" in stderr and "no LLM is connected" not in stderr
+    assert "private-rejected-output-marker" not in stderr and BUSINESS_CONTENT not in stderr
