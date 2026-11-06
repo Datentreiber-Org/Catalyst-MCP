@@ -1,6 +1,6 @@
 # Catalyst product scope and requirements
 
-Status: MVP requirements with a proposed implementation. Business Artifact and Use-case Catalog schemas, SQLite persistence, deterministic Markdown rendering and both generation workflows with scripted fake providers are implemented and tested. Both tools, canonical JSON and Markdown resources, and native links to both views are exposed over local MCP stdio, including restart reads of both saved types. OpenAI, Anthropic and local Ollama JSON adapters and provider selection are implemented with mocked-HTTP verification. Both prompt/runtime integrations are implemented with mocked-HTTP checks. One OpenAI `gpt-6.1-sol` live sample verifies the two-tool flow, resources and restart persistence with a limited quality review; actual Codex desktop tool calls, resource access and persistence after app restart also pass for one synthetic sample. The user confirmed that resource links open as plain Markdown text. A local Catalyst workflow plugin is installed and enabled over the existing MCP connection; its fresh-chat business-user acceptance test remains pending. Broader model quality and live Anthropic/Ollama behavior remain unverified.
+Status: MVP requirements with a proposed implementation. Business Artifact and Use-case Catalog schemas, SQLite persistence, deterministic Markdown rendering and both generation workflows with scripted fake providers are implemented and tested. Both tools, canonical JSON and Markdown resources, and native links to both views are exposed over local MCP stdio, including restart reads of both saved types. OpenAI, Anthropic and local Ollama JSON adapters and provider selection are implemented with mocked-HTTP verification. Both prompt/runtime integrations are implemented with mocked-HTTP checks. One OpenAI `gpt-6.1-sol` live sample verifies the two-tool flow, resources and restart persistence with a limited quality review; actual Codex desktop tool calls, resource access and persistence after app restart also pass for one synthetic sample. The user confirmed that resource links open as plain Markdown text. A local Catalyst workflow plugin is installed and enabled. Its MCP connection is now registered at Codex user level so chats need no Codex project; neutral-folder configuration/startup checks pass, while the actual business-user retry remains pending. Broader model quality and live Anthropic/Ollama behavior remain unverified.
 
 ## 1. Product purpose
 
@@ -164,7 +164,29 @@ The business-model fields map to Datentreiber's Business Model / Case Canvas, wh
 
 ## Local plugin scope (step 18a)
 
-The user requested an installable Catalyst plugin for Codex. The first local package provides a guided business-user conversation over the existing project MCP connection: supply text, receive a saved Business Artifact, choose an idea count and optional focus, and receive the saved Catalog and resource views. It preserves the two-tool payloads and backend validation/storage contracts. The plugin manifest, workflow skill, UI metadata and repository marketplace are implemented, and Codex reports the plugin installed and enabled. A fresh-chat user acceptance run is still pending. The package requires the configured backend/environment on this machine; self-contained backend distribution and fresh-machine provider onboarding remain unimplemented. Custom browser UI and MCP Apps remain outside this step.
+The user requested an installable Catalyst plugin for Codex. The local package provides a guided business-user conversation over the Catalyst MCP connection: supply text, receive a saved Business Artifact, choose an idea count and optional focus, and receive the saved Catalog and resource views. It preserves the two-tool payloads and backend validation/storage contracts. The plugin manifest, workflow skill, UI metadata and repository marketplace are implemented, and Codex reports the plugin installed and enabled. An initial user chat outside the repository loaded the plugin but lacked its tools because the original MCP connection was project-scoped. The user requested Codex to act as a normal MCP client without creating a project. The connection is now user-level, with its project entry removed and unrelated settings preserved. Neutral-folder CLI resolution and SDK startup/resource checks pass; actual desktop user acceptance still needs a retry after reload. The server runtime directory is an installation location, independent of chat/project location. Clone-based backend/provider setup is now documented in the installation guide below; the workflow plugin still requires that separately configured environment. Self-contained backend distribution and automated provider onboarding remain unimplemented. Custom browser UI and MCP Apps remain outside this step.
+
+## Clone-based distribution and licensing (step 19)
+
+The [installation and client setup guide](CLIENT_SETUP.md) documents cloning the
+repository, installing locked runtime dependencies with uv, selecting a provider
+in a local `.env`, choosing persistent SQLite storage and registering a local
+stdio client. Codex registration is user-level and independent of a chat's
+folder. A generic JSON example supplies the same command/arguments for other
+clients, with no claim that every client's configuration or display is tested.
+The workflow plugin is optional and installed after the MCP backend is configured.
+
+The launch command uses uv's `--directory` with a relative `.env` path so the
+client need not set `cwd`, including when the checkout path contains spaces.
+The guide separates connection discovery, synthetic fake-provider checks, earlier
+live-model/host evidence and the pending desktop business-user retry. Fresh-OS
+installation, Windows/Linux execution and other clients remain unverified.
+
+The user selected Apache-2.0 and named Datentreiber as the copyright holder.
+`LICENSE` contains the standard license, `NOTICE` records the 2026 attribution,
+and package metadata declares the SPDX identifier and both license files.
+Step 19 adds documentation and licensing without changing the MVP contracts,
+application code, prompts or dependencies.
 
 ## 7. Future capabilities
 

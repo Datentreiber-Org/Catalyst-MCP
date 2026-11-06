@@ -53,7 +53,7 @@ test. `plugins/catalyst/plugin.json` packages a single workflow skill under
 marketplace is `.agents/plugins/marketplace.json`. This follows the
 [official local plugin packaging guidance](https://developers.openai.com/plugins/build/plugins).
 
-The plugin uses the existing project-scoped Catalyst MCP connection. It asks for
+The plugin uses the Catalyst MCP connection registered at Codex user level. It asks for
 business text and missing count/focus preferences, invokes the two existing
 tools in the requested workflow, retains actual saved IDs, and presents saved
 resource views. It does not generate substitute domain records in the host.
@@ -64,10 +64,53 @@ manual retry outside the backend's existing bounded correction.
 This first local package contains workflow instructions and metadata. Runtime
 installation, provider credentials and the SQLite path remain in the existing
 operator setup; no backend code, key, customer data or duplicate MCP registration
-is bundled. Other-machine onboarding and self-contained server distribution
-remain unimplemented. Installation/enabled state, skill validation and exact
+is bundled. Clone-based onboarding is documented in step 19 below; self-contained
+server distribution remains unimplemented. Installation/enabled state, skill validation and exact
 installed-file equality are verified. A fresh-chat user acceptance run remains
 pending and is separate from the earlier host-tool verification.
+
+### Client connection scope (step 18c)
+
+The user clarified that Codex should act as an ordinary MCP client without
+requiring a Codex project. The original project-scoped connection was moved
+to `~/.codex/config.toml`, preserving its command, timeout values, provider
+environment and private database. The project-specific server entry was removed
+and unrelated user settings were preserved. This follows Codex's supported
+[user-level configuration](https://learn.chatgpt.com/docs/config-file/config-basic).
+
+The runtime `cwd` points to the installed server environment on disk; the chat
+can be in any folder. The workflow plugin remains separate from the server
+connection, and no duplicate backend or bundled credentials were introduced.
+Codex CLI resolution and an official-SDK startup/resource probe passed from a
+neutral directory with no generation calls or database changes. A new actual
+desktop business-user retry outside the repository remains pending.
+
+### Clone-based onboarding and licensing (step 19)
+
+- Keep the existing Python console command and stdio transport. Document one
+  clone/install/provider/storage/register flow in [the client setup guide](CLIENT_SETUP.md),
+  linked from the README. Use `uv sync --locked --no-dev` for runtime installation
+  and `uv run --locked --no-sync` when a host starts the prepared environment.
+- Pass the checkout through uv's `--directory` and load `.env` relative to that
+  directory. Use an absolute executable path and persistent database path.
+  This avoids a client-specific `cwd` requirement and the absolute `.env` path
+  with spaces that failed under uv 0.12.23 during the audit. Keep each path as
+  one argument. No launcher wrapper, automatic client-config edit or setup wizard
+  is added.
+- Provide Codex user-level TOML and a generic `mcpServers` JSON example with the
+  same command/arguments. Explain client-specific wrappers, timeouts and reload
+  behavior; require local stdio support and make no HTTP endpoint claim. Keep
+  the workflow plugin optional and its installation separate from the backend.
+- Verify the documented configuration using an isolated checkout/environment
+  with spaces in its path, a neutral client working directory, synthetic fake
+  output, complete resource reads and restart persistence. Separate those SDK
+  checks from live generation and actual desktop/user acceptance. Do not reuse
+  the development machine's provider credentials, database or registration.
+- Apply the user's Apache-2.0 selection with Datentreiber attribution for 2026.
+  Include the unchanged standard license and a short `NOTICE`, declare
+  `license = "Apache-2.0"` and both `license-files` in `pyproject.toml`, and verify
+  license contents and metadata in wheel/source distributions. No dependency or
+  application behavior changes are needed.
 
 ## 2. MVP scope and creation semantics
 
