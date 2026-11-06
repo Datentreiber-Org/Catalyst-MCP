@@ -1,6 +1,6 @@
 # Catalyst MVP system design
 
-Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence, deterministic Markdown rendering and both generation workflows with scripted fake providers are implemented and tested. Both tools, canonical JSON and Markdown resource listing/reads, and links to both views are exposed over local MCP stdio, including restart verification. OpenAI, Anthropic and local Ollama JSON transports, environment settings and provider selection are implemented with mocked-HTTP verification. Both prompt/runtime integrations are implemented with mocked-HTTP checks; live-model behavior and selected-host integration are unverified.
+Status: implementation design for the two-tool MVP. Business Artifact and Use-case Catalog schemas, SQLite persistence, deterministic Markdown rendering and both generation workflows with scripted fake providers are implemented and tested. Both tools, canonical JSON and Markdown resource listing/reads, and links to both views are exposed over local MCP stdio, including restart verification. OpenAI, Anthropic and local Ollama JSON transports, environment settings and provider selection are implemented with mocked-HTTP verification. Both prompt/runtime integrations are implemented with mocked-HTTP checks. One OpenAI `gpt-6.1-sol` live sample verifies complete saved outputs, both resource formats and restart reads; actual Codex desktop tool calls, native JSON/Markdown resource access and persistence after a second app restart also pass for one synthetic sample. The user confirmed that links open as plain Markdown text; formatted rendering was not confirmed. Broader model behavior and other hosts remain unverified.
 
 See [Product scope and requirements](PROJECT_CONTEXT.md) for the product contracts, scope and open choices. This document recommends implementation details, including create-only records, optional input focus, string-array entries, alignment objects and generation limits. These details remain proposals unless explicitly recorded as implementation decisions below.
 
@@ -44,6 +44,30 @@ flowchart TB
 ```
 
 The backend assigns record IDs and metadata, validates content, and manages storage. MCP supplies the interface for tool calls and resource reads. The official [server-building guide](https://modelcontextprotocol.io/docs/develop/build-server) describes the server/client integration.
+
+### Local workflow plugin (step 18a)
+
+The user requested an installable Catalyst plugin for a normal business-user
+test. `plugins/catalyst/plugin.json` packages a single workflow skill under
+`skills/catalyst/`, with display metadata in `agents/openai.yaml`. The local
+marketplace is `.agents/plugins/marketplace.json`. This follows the
+[official local plugin packaging guidance](https://developers.openai.com/plugins/build/plugins).
+
+The plugin uses the existing project-scoped Catalyst MCP connection. It asks for
+business text and missing count/focus preferences, invokes the two existing
+tools in the requested workflow, retains actual saved IDs, and presents saved
+resource views. It does not generate substitute domain records in the host.
+An analysis-only request stops after analysis; ideation uses the user's selected
+saved artifact. A tool error stops the workflow instead of adding another
+manual retry outside the backend's existing bounded correction.
+
+This first local package contains workflow instructions and metadata. Runtime
+installation, provider credentials and the SQLite path remain in the existing
+operator setup; no backend code, key, customer data or duplicate MCP registration
+is bundled. Other-machine onboarding and self-contained server distribution
+remain unimplemented. Installation/enabled state, skill validation and exact
+installed-file equality are verified. A fresh-chat user acceptance run remains
+pending and is separate from the earlier host-tool verification.
 
 ## 2. MVP scope and creation semantics
 

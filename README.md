@@ -102,6 +102,95 @@ The server uses the [official MCP Python SDK](https://py.sdk.modelcontextprotoco
 version 2.3.0 recorded in `uv.lock`, with its documented
 [low-level server API](https://py.sdk.modelcontextprotocol.io/advanced/low-level-server/).
 
+## Use the local Catalyst plugin
+
+The local `catalyst@catalyst-local` plugin provides a business-user workflow. It
+uses the existing Catalyst MCP connection configured for this project. It
+packages instructions and display metadata; the Python backend, environment,
+provider credentials and database still require the setup described below.
+The current connection uses the private host-test database.
+
+The repository marketplace and plugin can be registered and installed with:
+
+```bash
+codex plugin marketplace add /absolute/path/to/Catalyst-MCP
+codex plugin add catalyst@catalyst-local
+```
+
+The plugin is installed and enabled on the development machine. To try the user
+experience, restart Codex so it loads the new plugin, open a fresh chat in this
+project, and invoke `$catalyst`. Start with:
+
+```text
+Use $catalyst to help me develop Data & AI ideas for my business.
+```
+
+The workflow should ask for business text, analyze it with Catalyst, show the
+saved business model, and ask for the number of ideas and optional focus when
+those preferences are missing. It keeps saved IDs behind the scenes and uses
+the selected artifact for ideation. The backend's complete JSON/Markdown views
+remain available through the returned resource links.
+
+For example, supplying a bicycle-repair shop description and requesting two
+appointment-planning ideas should create one saved Business Artifact and a
+two-case Catalog linked to it. This is the expected acceptance flow; a fresh-chat
+test inside this configured project remains pending. An observed test in a
+chat outside this repository loaded the skill but had no Catalyst backend tools,
+because this package does not bundle its MCP connection. The earlier live-model
+and host checks verified the backend separately.
+
+Package files:
+
+- `plugins/catalyst/plugin.json` gives the plugin its identity and version.
+- `plugins/catalyst/skills/catalyst/SKILL.md` defines the business conversation and
+  calls the existing tools rather than substituting generated answers.
+- `plugins/catalyst/skills/catalyst/agents/openai.yaml` provides the skill's
+  display name and starter prompt.
+- `.agents/plugins/marketplace.json` makes the local plugin discoverable.
+
+The package and installed copy contain no credentials, business records or
+backend source. Installation on a fresh machine with backend/provider onboarding
+has not been implemented or verified by this local workflow package.
+
+## Connect Codex desktop
+
+Codex desktop is the selected host for step 17b. A trusted project can register
+Catalyst in `.codex/config.toml`, following the
+[official MCP configuration guidance](https://learn.chatgpt.com/docs/extend/mcp).
+Use absolute paths for uv, the repository, the local `.env` and the database:
+
+```toml
+[mcp_servers.catalyst]
+command = "/absolute/path/to/uv"
+args = [
+  "run", "--locked", "--no-sync",
+  "--env-file", "/absolute/path/to/Catalyst-MCP/.env",
+  "catalyst-mcp",
+  "--database", "/absolute/path/to/Catalyst-MCP/private/codex-host.sqlite3",
+  "--live-analysis", "--live-ideation",
+]
+cwd = "/absolute/path/to/Catalyst-MCP"
+startup_timeout_sec = 30
+tool_timeout_sec = 180
+```
+
+Replace the example paths; `command -v uv` locates uv. Install the locked
+environment first with `uv sync --locked`. Credentials stay in `.env` and are
+loaded by uv; do not copy API keys into the MCP configuration. This repository
+ignores the machine-specific `.codex/config.toml` and private test databases.
+
+`codex mcp get catalyst --json` checks the resolved configuration. Fully quit and
+reopen Codex, then return to the project chat to load the new connection. A
+server reload control can be used instead when the installed app exposes one;
+the MCP settings menu is not present in every observed interface.
+Configuration loading and an SDK startup probe are separate from actual host
+verification. The recorded Codex desktop check passed both tools, source
+alignments, JSON/Markdown resource access and persistence after an app restart.
+The user confirmed that resource links open as plain Markdown text; a formatted
+preview was not confirmed. The 180-second host timeout allows room for a
+corrective generation; it does not change the provider network timeout or add
+a backend deadline.
+
 ## Analysis over MCP
 
 Run this Python example from the repository root with the project's environment.
