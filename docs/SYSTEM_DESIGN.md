@@ -112,6 +112,21 @@ desktop business-user retry outside the repository remains pending.
   license contents and metadata in wheel/source distributions. No dependency or
   application behavior changes are needed.
 
+### Documentation entry points (step 20)
+
+- Keep the [README](../README.md) focused on purpose, current capabilities,
+  quickstart, a business example, limits, contribution guidance and license.
+  Preserve the user-provided introduction verbatim.
+- Keep client installation/registration in [Client setup](CLIENT_SETUP.md).
+  Move all 17 Python/MCP examples and their expected outputs to
+  [Examples](EXAMPLES.md), preserving executable code and example order.
+- Move callback, service and provider explanations, the configuration reference,
+  test guidance and build instructions to [Development](DEVELOPMENT.md). Link to
+  existing product/design contracts rather than creating another contract.
+- Check moved code/output preservation, local links and heading anchors, run the
+  examples with fresh synthetic demo data and inspect packaged README metadata.
+  Do not change application code, dependencies, prompts or client configuration.
+
 ## 2. MVP scope and creation semantics
 
 - Accept business content as text. PDF/PPT extraction is a separate input-preparation step.

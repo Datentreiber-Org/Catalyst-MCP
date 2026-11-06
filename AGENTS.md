@@ -4,6 +4,10 @@
 
 Read [Product scope and requirements](docs/PROJECT_CONTEXT.md) and the [MVP system design](docs/SYSTEM_DESIGN.md) before making implementation changes. The product document defines the MVP scope; the system design records a proposed implementation. Keep both documents consistent as decisions are made.
 
+The [development guide](docs/DEVELOPMENT.md) covers modules, configuration, tests
+and builds. Complete runnable Python/MCP examples and expected outputs are in
+[the examples guide](docs/EXAMPLES.md); the README remains the public entry point.
+
 ## Incremental working agreement
 
 - Build Catalyst in small steps that the user can comfortably review and understand. The checklist below is a proposed sequence, not authorization to implement it.
@@ -166,3 +170,19 @@ existing client registration, credentials and database were not changed. No
 commit, push or package publication was performed.
 
 - [x] 19b. Apply Apache-2.0 with Datentreiber attribution and verify license files and metadata in both built distributions.
+
+Step 20 verification (2026-11-06): shortened the README from 1,449 to 144 lines,
+preserving the user-provided introduction verbatim. All 17 Python code blocks,
+15 expected-text blocks and two Markdown output fragments are unchanged and in
+their original order in `docs/EXAMPLES.md`. All 17 scripts ran as separate
+processes in a fresh demo directory through the documented uv project command;
+their expected text or Markdown fragments matched. These are synthetic schema,
+repository, fake-provider, mocked-HTTP and local MCP checks, with no new live-model
+or actual desktop/other-host verification. Local documentation links and heading
+anchors, Git whitespace checks, wheel/source-distribution builds, packaged README
+contents and unchanged Apache-2.0 metadata passed. Updated client configuration
+links and project/design references to the new guides. Application code, prompts,
+tests, dependencies, lockfile, license files and plugin source are unchanged;
+the existing automated test suite was not rerun. No commit or push was performed.
+
+- [x] 20. Shorten the README while preserving the user's introduction; move all 17 runnable examples and expected outputs to `docs/EXAMPLES.md`, developer/configuration/test/build guidance to `docs/DEVELOPMENT.md`, and update documentation links. Documentation and example verification complete; prior live-model/host limitations are unchanged.

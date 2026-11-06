@@ -53,7 +53,7 @@ content or saved artifact/focus to the selected provider and can incur API charg
 Resource reads use saved data without another model call.
 
 The example also documents optional network-timeout and output-token settings.
-See the [configuration reference](../README.md#llm-configuration-and-provider-clients)
+See the [configuration reference](DEVELOPMENT.md#llm-configuration-and-provider-clients)
 for their defaults and validation. `.env` is Git-ignored; keep real keys there.
 Catalyst reads environment variables; the launch command below uses uv to load
 `.env` explicitly.

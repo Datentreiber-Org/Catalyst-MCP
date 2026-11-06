@@ -188,6 +188,18 @@ and package metadata declares the SPDX identifier and both license files.
 Step 19 adds documentation and licensing without changing the MVP contracts,
 application code, prompts or dependencies.
 
+## Documentation structure (step 20)
+
+The [README](../README.md) is the public entry point: purpose, current capabilities,
+quickstart, one business workflow example, development limits, contribution links
+and licensing. [Client setup](CLIENT_SETUP.md) contains the full installation and
+registration instructions. [Examples](EXAMPLES.md) preserves the 17 runnable
+Python/MCP examples and expected outputs, with instructions to use separate demo
+data. [Development](DEVELOPMENT.md) contains the architecture overview, module and
+service explanations, LLM configuration reference, tests and build instructions.
+This reorganization changes documentation only; MVP behavior and contracts stay
+the same.
+
 ## 7. Future capabilities
 
 These capabilities require further design and are not part of the two-tool MVP.
