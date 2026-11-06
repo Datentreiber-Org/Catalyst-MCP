@@ -3,6 +3,7 @@
 .env.*
 !.env.example
 .secrets/
+.codex/config.toml
 
 # Python environments and generated files
 .venv/
@@ -37,3 +38,5 @@ htmlcov/
 
 # macOS
 .DS_Store
+
+Catalyst_V37_B_INCLUDED_CATALOG

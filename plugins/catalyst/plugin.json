@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "catalyst",
+  "version": "0.1.0",
+  "description": "Develop business-aligned Data & AI ideas through a guided workflow using the connected Catalyst MCP server."
+}

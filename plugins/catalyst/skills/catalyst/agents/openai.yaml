@@ -1,0 +1,4 @@
+interface:
+  display_name: "Catalyst"
+  short_description: "Develop business-aligned Data & AI use cases"
+  default_prompt: "Use $catalyst to help me analyze my business and develop aligned Data & AI ideas."

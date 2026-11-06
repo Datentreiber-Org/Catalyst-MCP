@@ -1,0 +1,20 @@
+{
+  "name": "catalyst-local",
+  "interface": {
+    "displayName": "Catalyst Local"
+  },
+  "plugins": [
+    {
+      "name": "catalyst",
+      "source": {
+        "source": "local",
+        "path": "./plugins/catalyst"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
