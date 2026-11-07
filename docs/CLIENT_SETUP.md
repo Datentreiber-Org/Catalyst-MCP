@@ -217,17 +217,3 @@ for these plugin commands depends on the installed Codex version.
 After updating the checkout, run `uv sync --locked --no-dev` again and restart
 the MCP connection. Keep your `.env` and database. Removing the client's server
 entry disconnects it without deleting those local files.
-
-## Verification limits
-
-The clone-based launch is checked locally on macOS with Python 3.12.2 and uv
-0.12.23, using a separate environment, a checkout path containing spaces and a
-client working outside the checkout. Synthetic fake responses verify both tools,
-source linkage, both resource formats and restart persistence. Live-mode startup
-is checked without making a model request.
-
-Earlier checks cover one actual OpenAI live-model flow and actual Codex desktop
-tool/resource/restart operations. A desktop business-user retry with the optional
-plugin remains pending. This guide does not establish fresh operating-system
-installation, Windows/Linux execution, live Anthropic/Ollama behavior or other
-clients' compatibility.
