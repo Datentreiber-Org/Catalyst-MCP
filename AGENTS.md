@@ -2,7 +2,12 @@
 
 ## Project references
 
-Read [Product scope and requirements](docs/PROJECT_CONTEXT.md) and the [MVP system design](docs/SYSTEM_DESIGN.md) before making implementation changes. The product document defines the MVP scope; the system design records a proposed implementation. Keep both documents consistent as decisions are made.
+Read [Product scope and requirements](docs/PROJECT_CONTEXT.md), the
+[system design](docs/SYSTEM_DESIGN.md) and the
+[web-app implementation plan](docs/WEB_APP_PLAN.md) before making implementation
+changes. The MVP contracts remain the compatibility baseline. The web-app plan
+defines the proposed post-MVP work on `feature/web-app`; keep all three documents
+consistent as decisions are made.
 
 The [development guide](docs/DEVELOPMENT.md) covers modules, configuration, tests
 and builds. Complete runnable Python/MCP examples and expected outputs are in
@@ -19,20 +24,33 @@ and builds. Complete runnable Python/MCP examples and expected outputs are in
 - Maintain the short checklist below as work progresses. Check an item only when its scope is implemented and verified; record any verification limitations alongside its status. Keep the project documents consistent with decisions and actual behavior.
 - Do not commit or push automatically.
 
-## Goal and contracts
+## Branch goal and compatibility contracts
 
-Implement this complete flow:
+On `feature/web-app`, plan and incrementally implement the V37-B workflow:
+
+`company URL + optional document → retained evidence → analyzed model → user-reviewed saved snapshot + optional answers → ten aligned cases + three selections → exploration and downloads`.
+
+Keep the existing text-based MCP flow working independently of the web app:
 
 `business text → analyze-business-model → saved Business Artifact → ideate-use-case → saved Use-case Catalog`.
 
 - Preserve the documented payloads, including `ideate-use-case` (singular), `targetUsers`, and all 12 business-model sections.
 - Return the complete saved artifact or catalog from each tool.
 - The Business Artifact payload includes `uri`. Construct the Catalog resource URI in the MCP layer without requiring a Catalog `uri` field.
-- Keep additional required fields and capabilities outside the documented MVP scope unless the requirements change.
+- Add web requirements through explicit new/versioned contracts. Do not silently
+  add required fields, output caps or editing behavior to existing MCP payloads.
+- V37-B's Job A `1.2` and Job B `1.3`/variant `B` are application contract
+  versions, not MCP protocol versions. Resolve specification disagreements before
+  implementing their affected steps.
+- The checklist is planning, not blanket authorization to implement it. Only
+  documentation planning is authorized by the request that created this list.
 
 ## Implementation guidance
 
-The proposed implementation uses one Python backend, the official MCP SDK, Pydantic, SQLite, local stdio and an LLM-provider adapter. These are design recommendations; document alternatives and their rationale before departing from them.
+The baseline uses one Python backend, the official MCP SDK, Pydantic, SQLite,
+local stdio and LLM-provider adapters. Reuse the backend services for the web
+workflow. Choose browser transport, frontend tooling, richer record contracts
+and deployment policy in the plan's decision steps before implementation.
 
 - Follow the existing `src/catalyst_mcp/` package layout and Python requirements in `pyproject.toml`.
 - Name domain-specific test files `test_<domain>_<component>.py`. Use the short domains `artifact` and `catalog`, with singular component names such as `model` and `repository`: for example, `test_artifact_model.py` and `test_catalog_repository.py`. Follow this convention for future domain-specific tests as well.
@@ -46,6 +64,16 @@ The proposed implementation uses one Python backend, the official MCP SDK, Pydan
 - With stdio transport, send logs to stderr and reserve stdout for MCP messages.
 - Keep credentials, real business inputs and generated customer records out of source files, fixtures and documentation. Use synthetic examples for public tests and examples.
 - Keep modules in one application and record material decisions and run instructions in the repository.
+- Keep core Python/MCP installation usable without frontend tooling. Place the
+  frontend in a separate application directory once its first step is authorized.
+- Never substitute demo fixtures for a failed live request or represent a typed
+  URL, user amendment or model hypothesis as verified website evidence.
+- Generate and rank only against the approved active model snapshot. Preserve
+  inactive items, revisions, evidence associations and the selected source.
+- Keep secrets and trusted metadata server-side. Treat fetched text, files,
+  answers, edited items and critic output as untrusted data.
+- Do not transmit feedback/contact details or publish/deploy the app without
+  explicit authorization. Local optional feedback is the reference behavior.
 
 ## Verification and reporting
 
@@ -54,135 +82,73 @@ The proposed implementation uses one Python backend, the official MCP SDK, Pydan
 - Distinguish tests with a fake provider from live-model and host-integration checks.
 - Report the checks actually performed and any remaining limitations. Do not describe planned behavior as implemented.
 - Keep changes within the requested scope and preserve unrelated work.
+- Verify frontend/backend schema and Unicode-limit parity, stale response
+  rejection, inactive-item exclusion, access isolation, deadlines and retry bounds.
+- Verify all ten cases, three consistent selections and complete exports against
+  the saved result's snapshot, including Unicode and literal special characters.
+- Separate fake-provider, mocked retrieval/HTTP, real browser, live-model,
+  MCP-host and deployment checks. The prototype's QA reports do not verify this
+  branch. Record actual commands, outcomes and remaining limitations per step.
 
-## Implementation status
+## Baseline and current status
 
-The repository contains strict Business Artifact and Catalog models, SQLite persistence and deterministic Markdown renderers for both record types, with tests and a uv development setup. Catalog source associations are enforced through a foreign key and checked against stored JSON on reads. Both generation services validate requests and scripted fake-provider output, allow one corrective attempt, assign metadata and return complete committed records. Analysis defaults to a configurable 20,000-character limit. Ideation loads its saved source before generation, defaults to a configurable maximum of 10 ideas, checks the exact count and every alignment against the named source section, and preserves the source. The official MCP SDK 2.3.0 exposes both tools and JSON/Markdown resources over local stdio. Successful tool results include the complete saved JSON and native links to both views. Resource listing pairs canonical JSON then `/view.md` Markdown for each record; reads return complete saved JSON or deterministic Markdown with the correct MIME type and no provider calls or data changes. The command requires an explicit database path and accepts independent optional analysis (`--fake-response`) and ideation (`--fake-ideation-response`) scripts. It logs to stderr and supports ideation-only startup or both resource formats with no scripts. The complete two-tool fake-provider flow, tool links and both resource formats after restart are verified. `LLMSettings`, the shared `JSONClient` contract, OpenAI/Anthropic/Ollama adapters and `create_json_client` are implemented and verified with mocked HTTP. Environment configuration selects the provider/model, matching cloud credential, network timeout, output-token limit and Ollama origin. The local Ollama adapter needs no key. `LLMAnalysisProvider` and `LLMIdeationProvider` load packaged prompts and connect both services to configured clients. Independent `--live-analysis` and `--live-ideation` flags enable the selected workflows; both live bridges share one configured provider/model without conversation history. Fake/default/resource-only mode needs no LLM configuration. Prompt/data boundaries, bounded correction, complete saved results, count/alignment enforcement, unchanged sources and all three client paths are verified with mocked HTTP, including mixed/live stdio modes and existing-source ideation. Environment-based database/input/count settings and overall provider deadlines remain unimplemented. One OpenAI `gpt-6.1-sol` live sample now verifies both tools, complete committed results, exact alignments, both resource formats and restart persistence, with a documented limited quality review. Actual Codex desktop tool calls, matching resource links, native JSON/Markdown access and persistence after a second app restart are verified for one synthetic sample. The user confirmed that links open as plain Markdown text; a formatted preview was not confirmed. Broader model quality, live Anthropic/Ollama behavior and adversarial cases remain unverified. A local Catalyst workflow plugin is packaged, installed and enabled. The user requested Codex as an ordinary MCP client without project binding, so the existing connection is now user-level and the project entry is removed. Configuration resolution and SDK preflight pass from a neutral folder; the actual business-user retry and other-machine onboarding remain unverified or unimplemented. See the product document for open implementation choices.
+The existing backend implements both MCP tools, strict models, exact source
+alignment, atomic SQLite persistence, deterministic JSON/Markdown resource reads,
+and OpenAI/Anthropic/Ollama adapters. Automated evidence uses fake providers and
+mocked HTTP; limited OpenAI live-model and Codex desktop checks are recorded in
+the [MVP history](docs/MVP_IMPLEMENTATION_HISTORY.md). Their limitations remain.
 
-## Implementation checklist
+The V37-B package is an ignored local offline prototype. Its reported QA is
+reference material, not verification of a live web integration. No web-app task
+below is implemented or verified by the planning changes. Keep the MVP history
+as a historical record rather than repeating its completed checklist here.
 
-Clone-based onboarding and licensing are now documented in
-[the client setup guide](docs/CLIENT_SETUP.md). Step 19 adds the user-provided
-README introduction, portable client examples and Apache-2.0 licensing with
-Datentreiber attribution. Its isolated clone/SDK checks are separate from the
-pending desktop business-user retry and from fresh-OS or other-client testing.
+## Web-app implementation checklist
 
-Steps 1 through 17, including all parts of steps 14 and 17, are authorized and complete for their recorded scopes. The user authorized and completed step 10 before returning to step 9. The user expanded step 14 into separately reviewable parts: shared configuration and OpenAI (14a), Anthropic (14b), then Ollama (14c). The user explicitly authorized both 14b and 14c after completing 14a, then authorized steps 15 and 16. The user authorized step 17a: one live-model flow, quality review and restart checks. It is complete for one OpenAI sample. The user subsequently authorized step 17b and selected Codex desktop. Actual host tool calls, native resource discovery/reads and persistence of the new host records after a second app restart passed. The user confirmed that the resource links open as plain Markdown text. The user then requested an installable Catalyst plugin in Codex, authorizing the small local workflow package in step 18a. It is installed and verified at the package/configuration level. A projectless user test exposed the project-scoped backend dependency. The user then authorized project-independent client behavior; step 18c moves that connection to Codex user-level configuration. The actual business-user retry remains pending. All unchecked implementation steps require explicit authorization. Add only the dependencies, configuration, documentation, and tests needed by each authorized step.
+Details, dependencies, likely files and completion checks for every task are in
+[WEB_APP_PLAN.md](docs/WEB_APP_PLAN.md). Each checkbox is a separate authorization
+and review unit. Split further before coding if a unit becomes too large.
+Do not skip the decision gates or mark a task complete on fake checks when its
+specified live/browser/deployment acceptance remains outstanding.
 
-Step 1 verification: Python 3.12.2, pytest 9.1.1, locked environment sync, package import, source-distribution and wheel builds, and placeholder command execution were verified. At that step, pytest collected zero tests and returned exit code 5 because no application tests existed yet.
-
-Step 2 verification: all 158 Business Artifact contract test cases passed with Python 3.12.2, pytest 9.1.1 and Pydantic 2.14.1. Locked environment sync, source-distribution and wheel builds, and concrete input/artifact validation examples succeeded. Tests cover strict input and section types, required fields, metadata consistency, exact JSON shapes and content-preserving JSON round trips. These are local schema tests; fake-provider, live-model and host-integration checks have not been performed. Configurable input-size enforcement remains part of the later analysis workflow.
-
-Step 3 verification: 124 new ideation and Catalog contract cases passed alongside the 158 existing cases, for 282 passing tests on the same Python, pytest and Pydantic versions. Source-distribution and wheel builds, ideation-input and complete Catalog examples, and JSON round trips succeeded. Checks cover optional input focus, positive strict counts, alignment structure, required content, metadata boundaries, unique case IDs and the absence of a Catalog URI field. These remain local schema checks; no provider or host integration was tested. The configurable upper count limit, exact requested count and matching references against a saved source artifact remain unimplemented.
-
-Step 4 verification: 21 new repository cases passed alongside the 282 existing cases, for 303 passing tests with SQLite 3.46.0 on the same Python, pytest and Pydantic versions. Tests use real temporary SQLite files and verify a separate Python process can retrieve saved JSON. They cover complete save/read/list results, duplicate-ID rejection, invalid mutated inputs, special characters, unchanged JSON and timestamps after reads, row/payload ID consistency, and rollback on a deferred constraint failure at commit. Source-distribution and wheel builds and the complete README storage example succeeded. These are local schema and repository checks; fake-provider, live-model and MCP-host checks remained unperformed. Catalog storage was deferred to step 5.
-
-Step 5 verification: 23 new Catalog repository cases passed alongside the 303 existing cases, for 326 passing tests on the same Python, SQLite, pytest and Pydantic versions. Checks cover adding the Catalog table to a step-4 database, complete save/get/list results, source foreign-key enforcement, missing sources, duplicate Catalog IDs, invalid mutated inputs, Catalog/source ID mismatches, unchanged JSON and timestamps after reads, cross-process persistence and failed-commit rollback. Both README storage examples ran successfully. These are local schema and real SQLite repository checks; no fake-provider, live-model or MCP-host checks were performed. Source lookup before generation, exact alignment matches and requested-count checks remain unimplemented.
-
-Step 6 verification: 58 new Business Artifact Markdown cases passed alongside the 326 existing cases, for 384 passing tests. CommonMark parsing with development dependency markdown-it-py 4.2.0 verifies all five metadata values, all 12 sections, explicit empty sections, array order, duplicate and long statements, literal Markdown/HTML, Unicode and preserved whitespace. Rendering is identical after repeated calls and a separate-process read; saved JSON, timestamps and files remain unchanged. The README storage/rendering examples, source-distribution and wheel builds, and wheel inclusion of the renderer succeeded; the parser is not a runtime wheel dependency. At that step, MIME types, MCP routes, Catalog rendering and host display had not been implemented or verified. No provider calls were made.
-
-Step 7 verification: 23 new Catalog Markdown cases passed alongside the 384 existing cases, for 407 passing tests on the same Python, Pydantic, pytest and Markdown parser versions. Parsed CommonMark verifies complete Catalog metadata, computed source URI, all cases, target users, solutions and alignment entries in saved order, exact section keys, empty target-user lists, literal text, long content and duplicate entries. Rendering is deterministic after JSON reloads and a separate-process read, with Catalog/source JSON, timestamps and saved files unchanged. All README storage and rendering examples ran successfully. The Catalog and its source reference still have no added URI field. MIME types, MCP routes and host display remain unimplemented and unverified; no provider calls were made.
-
-Step 8 verification: 34 new analysis service cases passed alongside the 407 existing cases, for 441 passing tests. They use a scripted fake provider and real temporary SQLite files to verify complete committed results, UUID4 IDs and UTC metadata, repeated creation, strict input validation, default and configured character limits, one corrective attempt with fixed feedback, insufficient-content errors, provider failures and rollback on a real commit failure. The existing empty-model contract test now checks its distinct error code. All seven README Python examples ran in a temporary directory. Source-distribution and wheel builds succeeded; both contain the new analysis modules, which also import directly from the wheel. No dependencies were added. The fake returns supplied JSON and establishes orchestration only; live extraction quality, real-model prompt-injection resistance, provider deadline enforcement and MCP-host integration remain unimplemented or unverified.
-
-Step 9 verification (performed after step 10): 67 new Catalog service cases passed alongside the 468 existing cases, for 535 passing tests. Scripted fake providers and real temporary SQLite files verify complete committed Catalogs, UUID4 metadata, exact source associations, optional focus preservation, default/configured count limits, references to all 12 sections and rejection of case/whitespace/Unicode near-matches. Checks cover every case/alignment, one fixed corrective attempt, missing/corrupt source rejection before generation, provider failure propagation, repeated creation, cross-process retrieval, unchanged source JSON/timestamps and rollback on a real deferred commit failure. All nine README Python examples ran successfully in a temporary directory. No dependencies were added and package builds were not rerun in this step. These checks establish orchestration and valid references with a fake; ideation exposure through MCP, semantic focus compliance, idea/rationale quality, live-model behavior and selected-host compatibility remain unimplemented or unverified.
-
-Step 10 verification: 27 new analysis MCP cases passed alongside the 441 existing cases, for 468 passing tests with official MCP SDK 2.3.0. SDK-client checks verify exact discovery schemas, complete structured/JSON results, strict arguments and size limits, unregistered names, fixed provider-failure messages, insufficient-content failures and a real deferred SQLite commit rollback. Real console subprocesses verify MCP initialization with protocol 2025-06-18, discovery, calls, bounded correction, exhausted scripts, restart persistence, startup errors on stderr and JSON-RPC-only stdout. Imports start no server or database. All eight README examples, locked environment sync and source-distribution/wheel builds succeeded. The built packages contain the new server and entry point; direct wheel imports and its declared MCP dependency were checked. These were local protocol checks with a scripted fake, not live-model or selected-host integration checks. At that point, step 9, ideation exposure, resource routes/links, real provider integration and provider deadlines remained unimplemented.
-
-Step 11 verification: 36 new Catalog MCP cases and three full stdio-flow cases passed alongside the 535 existing cases, for 574 passing tests. Checks verify two-tool discovery, exact schemas, strict ideation arguments and default count bounds, preserved focus, complete committed Catalog results, missing/corrupt source handling, bounded correction, independent scripts and real failed-commit rollback. A distinct missing-source exception preserves `LookupError` compatibility and prevents provider lookup errors from being mislabeled. Real stdio subprocesses verify analysis followed by ideation with the returned artifact ID, persistence of both records, ideation-only restart, unchanged source data, rejected count/alignment output and JSON-RPC-only stdout with fixed stderr diagnostics. All ten README Python examples ran in a temporary directory and `git diff --check` passed. No dependencies were added or package builds rerun in this step. These are fake-provider and local MCP protocol checks; resource routes/links, real adapters/prompts, deadline enforcement, live-model quality and selected-host compatibility remain unimplemented or unverified.
-
-Step 12 verification: 40 new JSON resource cases and one new stdio restart case passed alongside the 574 existing cases, for 615 passing tests. Discovery/read checks verify empty and mixed sets, deterministic ordering, complete saved values and literal text, canonical URI matching, correct `application/json` MIME types, no Catalog URI field, current listings after saves, and zero provider calls. Repeated resource access preserves raw stored JSON, domain timestamps, database bytes and files. Missing/unsupported URIs and cursors return fixed `-32602` errors; corrupt records, inconsistent stored IDs/source associations and real database failures return fixed `-32603` errors without repair, partial listings or sensitive diagnostics. Existing full stdio flow checks now read created resources; a new check restarts the console command with no scripts and reads both complete records, including actual protocol-error responses. All eleven README Python examples and `git diff --check` passed. No dependencies were added or package builds rerun. These are repository and local MCP protocol checks; generation in the flow still uses scripted fakes. Markdown MCP routes/links, live-model behavior and selected-host compatibility remain unimplemented or unverified.
-
-Step 13 verification: 18 additional resource cases and extended existing MCP checks passed with the 615 prior cases, for 633 passing tests. Both saved types advertise JSON/Markdown pairs with distinct names, exact URIs and correct MIME types. Successful results preserve complete JSON text and structured payloads, followed by two native resource links matching discovery; failures return no links. SDK-client and real stdio checks read complete deterministic Markdown, recover literal special characters, preserve source links, and verify both views after restart without provider scripts. Reads make zero provider calls and preserve raw JSON, timestamps, database bytes and files. Missing views, corrupt data, rendering/database failures and colliding manually stored URI suffixes return fixed protocol errors without sensitive diagnostics. Exact canonical JSON lookup retains precedence for literal IDs ending in `/view.md`. All twelve README Python examples and `git diff --check` passed. No dependencies, domain models, storage or generation services changed; package builds were not rerun. Live-model behavior and selected-host display remain unverified. Steps 14 onward require explicit authorization.
-
-Step 14a verification: 47 new LLM settings/client cases passed alongside the prior 633 cases, for 680 passing tests. Strict immutable settings require an explicit supported provider/model and a credential, validate a positive finite network timeout (default 60 seconds), exclude credentials from normal representations and return fixed configuration errors. Tests exercise the actual OpenAI SDK 2.54.0 with HTTPX 0.28.1 MockTransport: generated-content schemas, separate instructions/input, unchanged completed text, `store=false`, disabled retries, explicit endpoint, client closure, refusals, partial/blank output, 10 HTTP error statuses and transport failures. No live API calls or credentials were used. All thirteen README Python examples, locked environment sync, source-distribution/wheel builds, package contents, declared OpenAI dependency, direct wheel imports and `git diff --check` succeeded. HTTPX is an explicit development dependency; the SDK supplies its runtime transport dependency. Analysis/ideation services, CLI behavior, domain payloads and storage are unchanged. Anthropic/Ollama, live prompt/runtime integration and overall deadlines remain unimplemented. Live model access/quality and selected-host integration remain unverified. Step 14b requires explicit authorization.
-
-Step 14b verification: 31 additional cases and extended OpenAI checks passed with the prior 680 cases, for 711 passing tests before starting 14c. The real Anthropic SDK 1.17.0 runs through mocked HTTPX2 requests. Checks verify the selected credential and explicit endpoint, system/user separation, public schema conversion without original-model changes, shared output-token limits, normal completion, refusal/truncation rejection, fixed errors, disabled retries and closed clients. `create_json_client` selects the configured cloud adapter without I/O or fallback, and mismatched constructors fail before connecting. No live cloud request was made. The SDK schema helper may move constraints into descriptions; the original Pydantic models remain responsible for complete validation when workflows are connected.
-
-Step 14c verification: 46 additional configuration/HTTP cases and all existing tests pass, for 757 passing tests. Mocked Ollama checks verify its configured HTTP(S) origin, separate system/user input, original schema, non-streaming request, output-token cap, normal completion and exact text preservation. They cover missing/unusable text, malformed/error envelopes, invalid JSON, truncation, redirects/status errors, timeouts, connection failures, one attempt, client closure and independent calls. Local configuration needs no key and ignores cloud credentials/proxy settings; invalid origins and unsupported selections fail without leaking values. All fifteen README Python examples, locked sync, source-distribution/wheel builds, package contents, runtime dependency declarations, direct wheel imports/provider selection and `git diff --check` passed. These are mocked-HTTP and existing fake-provider/local MCP checks. No live cloud/model/local-server or selected-host check was performed. Steps 15 and 16 still need analysis/ideation prompts and live runtime wiring; overall tool deadlines and environment-based database/input/count settings remain unimplemented. Stop before step 15 unless explicitly authorized.
-
-Step 15 verification: 21 new analysis-provider cases and eight new CLI/stdio cases pass alongside the prior 757 cases, for 786 passing tests. `LLMAnalysisProvider` loads the packaged UTF-8 analysis instructions and sends original business text as separate JSON data using the generated-content schema. Checks verify all 12 sections, the unnamed-source policy in the prompt, correction without source/rejected-output interpolation, independent calls, prompt failures and no partial record after failures. All three actual adapters/SDKs run through mocked HTTP behind the analysis service, MCP tool and JSON/Markdown readers, covering success, correction, invalid JSON, empty-model rejection and HTTP failure. New subprocess checks exercise the real CLI/parser/stdio path with mocked Ollama; startup errors use stderr and leave no database, conflicting scripts are rejected, and fake mode ignores invalid unselected LLM settings. All sixteen README Python examples, source-distribution/wheel builds, exact packaged prompt contents, direct wheel loading and committed analysis outside the repository, and `git diff --check` passed. No dependencies, domain schemas, service/repository logic or MCP payloads changed. No live model/credential/local-server or selected-host check was performed; extraction quality and prompt-injection resistance remain unverified. Stop before step 16 unless explicitly authorized.
-
-Step 16 verification: 40 new Catalog-provider cases, five new CLI configuration cases and eight new configured stdio-flow cases pass alongside the prior 786 cases, for 839 passing tests. `LLMIdeationProvider` loads its packaged UTF-8 prompt and sends complete saved-artifact/count/focus data with the existing generated-content schema. Checks cover null/literal focus, source/data separation, independent corrections without rejected output, exact counts, invalid alignments/metadata, missing sources, prompt failures, provider failures and no partial Catalog or source changes. All three actual adapters/SDKs run through mocked HTTP behind the service, MCP tool and both resource readers. Real CLI/stdio subprocesses with mocked Ollama verify existing-source ideation, both live tools and both mixed modes, corrections, complete results, resource links/reads and a single configured-client selection. Startup errors use stderr and leave no database. All seventeen README Python examples, source-distribution/wheel builds, exact contents of both prompts, direct wheel imports and committed analysis/ideation outside the repository, and `git diff --check` passed. No dependencies, domain schemas, service/repository logic or MCP payloads changed. These are fake-provider, mocked-HTTP and local protocol checks; live model access, extraction/idea quality, semantic focus compliance, prompt-injection resistance and selected-host compatibility remain unverified. Step 17 requires explicit authorization.
-
-- [x] 1. Verify Python 3.12+, repair package metadata's missing README, and establish the test setup.
-- [x] 2. Define and test Business Artifact input, generated-content, and saved-object models.
-- [x] 3. Define and test ideation input, generated-content, alignment, and Catalog models.
-- [x] 4. Add atomic Business Artifact storage, retrieval, and listing in SQLite.
-- [x] 5. Add Catalog storage, retrieval, and listing with enforced source associations.
-- [x] 6. Render complete, deterministic Business Artifact Markdown.
-- [x] 7. Render complete, deterministic Catalog Markdown.
-- [x] 8. Implement analysis generation, validation, bounded correction, and saving with a fake provider.
-- [x] 9. Implement ideation from a saved artifact with exact count and alignment validation using a fake provider.
-- [x] 10. Start the stdio MCP server and expose the analysis tool with complete saved-object results.
-- [x] 11. Expose the ideation tool and verify the two-tool flow with a fake provider.
-- [x] 12. Advertise and read canonical JSON resources for both saved object types.
-- [x] 13. Advertise and read Markdown resources and add links to both views in tool results.
-- [x] 14a. Add shared LLM configuration and the OpenAI JSON adapter; verified with mocked HTTP, no live-model check.
-- [x] 14b. Add and test the Anthropic adapter and its configuration; mocked HTTP, no live-model check.
-- [x] 14c. Add and test the local Ollama adapter and its configuration; mocked HTTP, no running-server check.
-- [x] 15. Connect the packaged analysis prompt to configured providers and explicit CLI mode; verified with mocked HTTP, no live-model check.
-- [x] 16. Connect the packaged ideation prompt to configured providers and independent CLI mode; verified with mocked HTTP, no live-model check.
-- [x] Add `.env.example` with OpenAI active and commented Claude/Ollama alternatives, plus local copy/load/switch instructions; all three configurations and Git ignore rules verified, 35 settings tests pass, no live model call.
-- [x] Prepare private, source-referenced business text, tool arguments and a live-model test plan from supplied PDFs; strict input models, character limit, exact JSON round trip, unchanged source hashes and Git ignore rules verified. User authorized preparation only; no live model or host check performed.
-Step 17a verification (2026-11-06): one real OpenAI `gpt-6.1-sol` analysis and one ideation request each returned HTTP 200 through the actual console stdio server and official SDK client. Analysis completed in 26.328 seconds; ideation completed in 24.802 seconds and returned exactly three cases with eleven exact source references. Complete saved objects, tool text/structured results, JSON/Markdown links, MIME types, deterministic repeated reads, unchanged source data/timestamps and restart retrieval of all four views passed. A resource-only restart required no LLM configuration and preserved database bytes. Private evidence and sample quality review record minor precision/category issues and idea overlap; this is not a broad model benchmark. No application code, prompts, dependencies or provider settings changed; existing automated tests were not rerun. Live failure paths, adversarial robustness, other providers and selected-host integration remain unverified.
-
-- [x] 17a. Verify one live OpenAI two-tool flow, source alignments, resource formats and restart persistence; sample quality assessed with limitations recorded privately.
-Step 17b verification (2026-11-06): Codex desktop exposed both tools after the user restarted the app. Actual host analysis and ideation completed in 12.763 and 17.724 seconds, saving a synthetic artifact and exactly two cases with seven exact alignments. Complete structured/JSON results, matching native links and MIME types, deterministic repeated native resource reads, source preservation and SQLite integrity passed. After a second user-confirmed app restart, all eight resource views, including the new host records, matched pre-restart content exactly with unchanged IDs, source associations, timestamps and database hash. No generation calls were made for that persistence check. The user confirmed that resource links open as plain Markdown text; formatted rendering was not confirmed and Computer Use did not inspect Codex directly. Private evidence distinguishes actual host operations from the earlier SDK preflight. No application code or dependencies changed; the existing automated suite was not rerun.
-
-- [x] 17b. Verify Codex desktop discovery, actual tool calls, source alignments, resource links, JSON/Markdown reads and persistence after restart; user-confirmed display is plain Markdown text, with no formatted-preview claim.
-
-Step 18a verification (2026-11-06): added a local plugin manifest, one Catalyst business workflow skill and display metadata, plus a repository marketplace entry. The workflow uses existing Catalyst tools/resources, retains actual saved IDs, asks only for missing business/count/focus input and stops on tool errors without extra generation retries. The skill validator passed in an isolated PyYAML environment; Catalyst dependencies and lockfile were unchanged. Codex accepted the marketplace and installed `catalyst@catalyst-local` version 0.1.0, and plugin listing reports installed/enabled. All three installed package files match source bytes; no keys, business records or backend source are bundled. No new model calls or fresh-chat user acceptance run were performed. This local package requires the existing project backend connection; portable backend/provider onboarding remains unimplemented.
-
-- [x] 18a. Package, validate and install the local Catalyst business workflow plugin using the existing MCP backend.
-- [ ] 18b. Business-user acceptance remains pending after a scope fix. The first projectless chat loaded the skill but had no Catalyst tools because the connection was project-scoped; no generation occurred. The user clarified that Codex should be an MCP client without project binding. Step 18c now registers the connection at user level; repeat the actual desktop workflow outside this repository after reload.
-
-Step 18c verification (2026-11-06): moved the existing Catalyst MCP server entry to user-level Codex configuration and removed its project-specific entry, preserving unrelated user settings, configuration permissions, startup/tool timeouts, runtime command, credentials location and database path. Codex resolves the enabled server and installed plugin from a neutral directory. An official-SDK transport probe launched from that directory discovered both tools and read all eight existing JSON/Markdown resources without model calls or database changes. This is configuration/startup evidence, not a completed desktop business-user retry. The server runtime directory is an installation path, not a Codex-project requirement. No application code or dependencies changed.
-
-- [x] 18c. Register Catalyst as a user-level MCP connection independent of Codex projects; neutral-folder configuration and startup/resource checks pass.
-
-Step 19a verification (2026-11-06): an unauthenticated public GitHub clone
-succeeded. Current reviewed working-tree files were applied to that clone before
-testing the new guide. A new runtime-only environment installed successfully
-with the existing Python 3.12.2 and uv 0.12.23 cache on macOS. The documented
-help command, parsed TOML/JSON examples and in-memory Codex configuration
-resolution passed. From a neutral directory, without a server `cwd` setting,
-the examples launched a checkout whose path contains spaces and loaded its
-relative `.env`. OpenAI, Anthropic and Ollama configurations each passed startup
-and discovery with synthetic settings, without model calls. Scripted fake output
-created one artifact and exactly two aligned cases; complete JSON, deterministic
-Markdown, four matching native links and unchanged resource views/database bytes
-after restart passed. The requested README introduction was checked verbatim;
-local Markdown links/anchors and Git whitespace checks passed. Existing
-application tests were not rerun. No actual desktop retry, fresh-OS installation,
-new live-model request or other-client integration was performed.
-
-- [x] 19a. Document and verify clone/install/provider/storage/client setup, portable Codex and generic stdio examples, and optional plugin installation; fresh-OS and other-client limits remain explicit.
-
-Step 19b verification (2026-11-06): the user selected Apache-2.0 and Datentreiber
-as copyright holder. Downloaded the unchanged standard license from apache.org,
-added a 2026 attribution in `NOTICE`, and declared `license`/`license-files` in
-package metadata. Wheel and source-distribution builds passed; both contain the
-exact license/notice bytes and correct `License-Expression`/`License-File` fields.
-The wheel metadata preserves the complete UTF-8 README. Dependencies, lockfile,
-application code, prompts, existing tests and plugin source are unchanged. The
-existing client registration, credentials and database were not changed. No
-commit, push or package publication was performed.
-
-- [x] 19b. Apply Apache-2.0 with Datentreiber attribution and verify license files and metadata in both built distributions.
-
-Step 20 verification (2026-11-06): shortened the README from 1,449 to 144 lines,
-preserving the user-provided introduction verbatim. All 17 Python code blocks,
-15 expected-text blocks and two Markdown output fragments are unchanged and in
-their original order in `docs/EXAMPLES.md`. All 17 scripts ran as separate
-processes in a fresh demo directory through the documented uv project command;
-their expected text or Markdown fragments matched. These are synthetic schema,
-repository, fake-provider, mocked-HTTP and local MCP checks, with no new live-model
-or actual desktop/other-host verification. Local documentation links and heading
-anchors, Git whitespace checks, wheel/source-distribution builds, packaged README
-contents and unchanged Apache-2.0 metadata passed. Updated client configuration
-links and project/design references to the new guides. Application code, prompts,
-tests, dependencies, lockfile, license files and plugin source are unchanged;
-the existing automated test suite was not rerun. No commit or push was performed.
-
-- [x] 20. Shorten the README while preserving the user's introduction; move all 17 runnable examples and expected outputs to `docs/EXAMPLES.md`, developer/configuration/test/build guidance to `docs/DEVELOPMENT.md`, and update documentation links. Documentation and example verification complete; prior live-model/host limitations are unchanged.
+- [ ] W01. Inventory existing UI files/assets and curate licensed references, synthetic fixtures and tracked requirements.
+- [ ] W02. Decide application boundaries, browser transport, deployment target and access policy.
+- [ ] W03. Reconcile and specify Job A/B, upload, status, read and error wire contracts.
+- [ ] W04. Decide evidence, edited-snapshot, identity, revision and MCP compatibility semantics.
+- [ ] W05. Decide quality/call budgets, export location, Unicode support and release acceptance.
+- [ ] W06. Record the baseline and establish only the verification tooling needed next.
+- [ ] W07. Implement strict evidence, questionnaire and editable-model input schemas.
+- [ ] W08. Implement rich-case/result schemas and shared V37-B output limits.
+- [ ] W09. Add versioned persistence for evidence and uploaded-source metadata.
+- [ ] W10. Persist reviewed model/answer revisions and immutable source snapshots.
+- [ ] W11. Persist complete rich results, source links and wire/backend case-ID mappings.
+- [ ] W12. Implement session/access isolation and the selected web request protections.
+- [ ] W13. Implement protected URL normalization and reachability checking.
+- [ ] W14. Implement bounded website retrieval and evidence extraction.
+- [ ] W15. Implement protected document upload and genuine file references.
+- [ ] W16. Implement bounded PDF extraction and failure handling.
+- [ ] W17. Implement bounded PPT/PPTX extraction and failure handling.
+- [ ] W18. Assemble traceable, bounded website/document evidence for generation.
+- [ ] W19. Implement evidence-based Job A with all twelve bounded model sections.
+- [ ] W20. Validate and save the approved edited model used by Job B.
+- [ ] W21. Generate ten rich, aligned cases and matching compact representations.
+- [ ] W22. Select three Next Best cases with consistent, bounded explanations.
+- [ ] W23. Add independent content criticism and one bounded Job B repair path.
+- [ ] W24. Implement correlated jobs, deadlines, cancellation, safe retries and restart outcomes.
+- [ ] W25. Expose browser endpoints and complete saved-result reads through thin handlers.
+- [ ] W26. Render complete deterministic web-report Markdown from saved results.
+- [ ] W27. Produce complete, literal-text-safe XLSX downloads.
+- [ ] W28. Produce and visually verify the thirteen-page Unicode-capable PDF report.
+- [ ] W29. Migrate the existing UI into the tracked frontend directory, then implement navigation states and the company-information step.
+- [ ] W30. Implement the three optional questions during Job A.
+- [ ] W31. Implement the twelve-box model editor and approved-snapshot submission.
+- [ ] W32. Implement the integrated ten-case selector and eight-field focus view.
+- [ ] W33. Connect downloads and print controls to the correct saved revision.
+- [ ] W34. Implement optional browser-local feedback/contact preferences without transmission.
+- [ ] W35. Apply reviewed branding and the agreed standalone/embedding/fullscreen behavior.
+- [ ] W36. Verify responsive layouts, accessibility and declared browser/device support.
+- [ ] W37. Complete runtime configuration, cleanup, cost/resource bounds and deployment protections.
+- [ ] W38. Verify integrated fake/mocked flows, hostile inputs, faults and MCP/storage compatibility.
+- [ ] W39. Evaluate an authorized live-provider flow and business-content quality separately.
+- [ ] W40. Finish open-source packaging, reproducible setup, CI and operator/contributor documentation.
+- [ ] W41. Complete user acceptance and the selected deployment release gate; record exclusions.

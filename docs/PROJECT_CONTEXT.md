@@ -2,6 +2,14 @@
 
 Status: MVP requirements with a proposed implementation. Business Artifact and Use-case Catalog schemas, SQLite persistence, deterministic Markdown rendering and both generation workflows with scripted fake providers are implemented and tested. Both tools, canonical JSON and Markdown resources, and native links to both views are exposed over local MCP stdio, including restart reads of both saved types. OpenAI, Anthropic and local Ollama JSON adapters and provider selection are implemented with mocked-HTTP verification. Both prompt/runtime integrations are implemented with mocked-HTTP checks. One OpenAI `gpt-6.1-sol` live sample verifies the two-tool flow, resources and restart persistence with a limited quality review; actual Codex desktop tool calls, resource access and persistence after app restart also pass for one synthetic sample. The user confirmed that resource links open as plain Markdown text. A local Catalyst workflow plugin is installed and enabled. Its MCP connection is now registered at Codex user level so chats need no Codex project; neutral-folder configuration/startup checks pass, while the actual business-user retry remains pending. Broader model quality and live Anthropic/Ollama behavior remain unverified.
 
+Branch planning: `feature/web-app` extends the product beyond the original MVP
+toward V37-B's browser workflow and its supporting backend capabilities. The
+[web-app plan](WEB_APP_PLAN.md) is the active proposed sequence; its checkbox
+tracker is in [AGENTS.md](../AGENTS.md). This planning does not implement or
+authorize all of those features. The sections describing the MVP below remain
+the compatibility baseline, with historical checks in
+[MVP implementation history](MVP_IMPLEMENTATION_HISTORY.md).
+
 ## 1. Product purpose
 
 Catalyst helps develop Data & AI use cases aligned with an organization's business model. The MVP converts business content into a structured Business Artifact, then uses that artifact to generate a saved Use-case Catalog.
@@ -64,7 +72,38 @@ The field name is `targetUsers`. The Catalog payload does not require a `uri` fi
 
 ### Outside the MVP
 
-Direct PDF/PPT extraction, custom UI/MCP Apps, editing, confirmation workflows, organizational hierarchy propagation, ROI, retrieval-augmented generation, scoring and prioritization are outside the current implementation scope. The MVP schemas do not require ownership, revision, approval or evidence fields.
+Direct PDF/PPT extraction, custom UI/MCP Apps, editing, confirmation workflows,
+organizational hierarchy propagation, ROI, retrieval-augmented generation,
+scoring and prioritization are outside the implemented two-tool MVP. The MVP
+schemas do not require ownership, revision, approval or evidence fields.
+
+### Post-MVP web-app target
+
+The user requested a new task plan on `feature/web-app` for V37-B Included
+Catalog. Its target flow is company URL plus optional PDF/PPT/PPTX → retained
+evidence → twelve-box analyzed model → user-reviewed saved snapshot with three
+optional questions → ten rich aligned cases and three Next Best selections →
+interactive focus views and complete PDF/XLSX/Markdown downloads.
+
+This adds evidence intake, editable/revisioned items, approved source snapshots,
+structured answers, eight full and eight compact fields per case, independent
+content criticism with bounded repair, and a correlated browser/job interface.
+The reference has no separate catalog overview screen. Downloads are ungated;
+feedback/contact is browser-local unless transmission is separately authorized.
+
+Preserve the existing MCP tool names/payloads, complete committed results,
+canonical JSON/Markdown views and source alignments. Web-only limits and fields
+need explicit new/versioned contracts. Wire `UC-01`…`UC-10` labels do not replace
+global backend IDs. The web plan records exact field budgets, requirements
+coverage, reference contradictions and per-task acceptance checks.
+
+Framework/transport, release exposure/access policy, retention, edited-source
+mapping, evidence truthfulness, repair budgets, export execution and supported
+browsers remain design gates. Local versus public deployment and actual contact
+collection must not be silently assumed. Hierarchy propagation, general ROI,
+portfolio scoring, variant A and MCP Apps remain outside this branch target.
+No new application code, dependencies, prompts, storage or runtime behavior is
+implemented by the planning update.
 
 ## 3. Proposed implementation
 
@@ -242,4 +281,11 @@ Scripted fake providers support local analysis and ideation workflow tests. On 2
 
 ## 9. Development priorities
 
-Follow the build order and completion criteria in the [system design](SYSTEM_DESIGN.md#9-build-order-and-completion-criteria). Prioritize a complete working flow, persistence across restart, accurate output shapes, faithful JSON and Markdown views, source alignment and failure atomicity. Record material implementation decisions as the design becomes executable.
+On `feature/web-app`, follow the individually authorized tasks in
+[AGENTS.md](../AGENTS.md) and [WEB_APP_PLAN.md](WEB_APP_PLAN.md), beginning with
+reference/contract decisions. The [MVP build order and completion criteria](SYSTEM_DESIGN.md#9-build-order-and-completion-criteria)
+remain the historical baseline rather than the active branch task list.
+Prioritize exact approved-source traceability, truthful evidence, complete saved
+outputs, finite failure handling, web access/input protections and a usable
+five-step flow. Preserve legacy behavior and record actual verification separately
+from proposed features, fake checks and production acceptance.

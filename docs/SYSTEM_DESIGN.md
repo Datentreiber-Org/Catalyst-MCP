@@ -4,6 +4,12 @@ Status: implementation design for the two-tool MVP. Business Artifact and Use-ca
 
 See [Product scope and requirements](PROJECT_CONTEXT.md) for the product contracts, scope and open choices. This document recommends implementation details, including create-only records, optional input focus, string-array entries, alignment objects and generation limits. These details remain proposals unless explicitly recorded as implementation decisions below.
 
+Branch note: the sections below record the existing two-tool MVP architecture
+and contracts. Planned post-MVP browser/backend extensions on `feature/web-app`
+are described in [section 10](#10-web-app-branch-design-boundary) and the
+[web-app plan](WEB_APP_PLAN.md). Those tasks have not been implemented by the
+planning update and do not silently replace the existing contracts.
+
 ## 1. Goal and operating model
 
 Implement this complete path:
@@ -561,6 +567,11 @@ The prompt files contain backend generation instructions. They are not separatel
 
 ## 9. Build order and completion criteria
 
+This is the MVP baseline. The active `feature/web-app` task list is in
+[AGENTS.md](../AGENTS.md), with dependencies and acceptance in
+[WEB_APP_PLAN.md](WEB_APP_PLAN.md). Earlier per-step verification is preserved in
+[MVP_IMPLEMENTATION_HISTORY.md](MVP_IMPLEMENTATION_HISTORY.md).
+
 1. Encode the MVP schemas and a synthetic reference business brief. Resolve the proposed contract details before publishing a stable API.
 2. Implement repository writes, reads and persistence across restart using fixed valid objects.
 3. Implement the two deterministic Markdown renderers. Register the two tools and all JSON/Markdown resource routes with a deterministic fake provider, then verify discovery and reads through the MCP interface.
@@ -582,3 +593,41 @@ The MVP is complete when:
 - Catalogs cannot be associated with a nonexistent source artifact.
 - Invalid generations and failed writes do not create partial records or misleading success results.
 - Manual checks on reference briefs find useful business extraction and relevant ideas. Passing schema validation is evaluated separately from business quality.
+
+## 10. Web-app branch design boundary
+
+The branch target adds V37-B's browser workflow and supporting backend functions
+in this repository. Reuse one Python backend's provider adapters, domain services
+and persistence patterns. Keep existing local stdio clients and installation
+independent from the frontend and its build tooling. `apps/web/` is the proposed
+frontend location; new backend modules belong under `src/catalyst_mcp/` when their
+specific task is authorized. No frontend framework, web server dependency,
+additional MCP transport or hosting provider is selected by this document.
+
+The intended responsibilities are browser interactions/presentation; a thin web
+transport with session/access/job handling; evidence intake and reviewed-source
+services; rich generation/selection/criticism; and persistence/complete saved
+views. Browser-versus-server export execution is an explicit decision. Do not
+create a second implementation of provider calls or business validation in the
+frontend. Optional browser-local feedback does not require a submission backend.
+
+The [decision gates](WEB_APP_PLAN.md#3-decisions-before-dependent-code) must settle
+complete Job A/B application envelopes, edited snapshot/evidence identity,
+revision/expiry/recovery semantics, optional versus required metadata, storage
+migration, public/local access policy and the total generation/repair budget.
+Backend code retains ownership of trusted IDs, timestamps, source associations,
+mode and correlation fields even where prototype prompts ask the model to echo
+them. Global IDs map to V37-B wire labels rather than being replaced by them.
+
+Existing immutable artifacts cannot be edited only in the browser while ideation
+continues to load their old IDs. A reviewed model must become an identifiable
+saved source before ideas are generated; preserve exact active-source alignments
+and distinguish website evidence from user amendments. Rich fields and UI/print
+limits require new/versioned contracts rather than a lossy rename or truncation
+of existing saved JSON. Migration/read/export checks must preserve old records,
+canonical resource URIs and timestamps.
+
+Public-hosting safeguards, retention and resource/cost bounds are planned
+engineering decisions and release requirements, not existing capabilities.
+Record selected designs here as W02–W05 and later tasks are authorized; do not
+describe proposed endpoints or prototype QA as implemented/verified behavior.
